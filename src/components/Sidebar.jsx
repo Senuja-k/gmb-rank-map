@@ -28,7 +28,7 @@ export default function Sidebar() {
       .then((r) => r.json())
       .then((d) => setBudget(d))
       .catch(() => {});
-  }, []);
+  }, [pathname]);
 
   const budgetPct = budget ? ((budget.totalCalls) / budget.totalFreeLimit) * 100 : 0;
 
