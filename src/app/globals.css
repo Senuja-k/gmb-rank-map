@@ -1,8 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f6fa;
+  --foreground: #1a2b4a;
+  --card: #ffffff;
+  --card-border: #e2e8f0;
+  --muted: #64748b;
+  --accent: #0ea5e9;
+  --accent-light: #38bdf8;
+  --sidebar-bg: #1a2b4a;
+  --sidebar-text: #94a3b8;
+  --sidebar-active: #ffffff;
+  --header-bg: #1e3a5f;
+  --rank-green: #4caf50;
+  --rank-orange: #ff9800;
+  --rank-red: #f44336;
 }
 
 @theme inline {
@@ -12,15 +24,73 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Rank badge colors */
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+}
+.rank-green { background: var(--rank-green); }
+.rank-orange { background: var(--rank-orange); }
+.rank-red { background: var(--rank-red); }
+
+/* Grid cell on the map */
+.grid-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+}
+
+/* Smooth table rows */
+.scan-table tr {
+  transition: background 0.15s;
+}
+.scan-table tbody tr:hover {
+  background: #f0f4ff;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Animated scanning shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer-bar {
+  background: linear-gradient(90deg, #0ea5e9 0%, #38bdf8 40%, #0ea5e9 80%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* Grid cell appear animation */
+@keyframes pop-in {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.grid-cell {
+  animation: pop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
