@@ -25,7 +25,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { email, locationName, reviewId, reviewerName, reviewText } = body;
+  const { email, locationName, reviewId, reviewerName, reviewText, customInstruction } = body;
 
   if (!email || !locationName || !reviewId || !reviewerName || !reviewText) {
     return NextResponse.json(
@@ -43,7 +43,8 @@ export async function POST(request) {
       locationName,
       reviewId,
       reviewerName,
-      reviewText
+      reviewText,
+      customInstruction
     );
     return NextResponse.json(result);
   } catch (err) {

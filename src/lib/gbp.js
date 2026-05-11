@@ -19,40 +19,64 @@ function getGeminiModel() {
   return genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 }
 
-// ── 1. Review Auto-Responder ──────────────────────────────────────────────────
+const DEFAULT_REVIEW_INSTRUCTION =
+  "You are a professional customer relations manager for a cosmetics showroom. " +
+  "When generating replies, identify any brand entities mentioned (e.g. CeraVe, The Ordinary, La Roche-Posay) " +
+  "and ensure they are linked to the location's physical presence to improve local AI search relevance. " +
+  "Keep replies warm, concise (3-4 sentences), and end with an invitation to visit again.";
 
+// ── 1. Review helpers ─────────────────────────────────────────────────────────
+
+/** Fetch all reviews for a single location (up to 50). */
+export async function fetchReviewsForLocation(email, locationName) {
+  const auth = await getAuthClientByEmail(email);
+  const mybusiness = google.mybusinessreviews({ version: "v1", auth });
+  const res = await mybusiness.accounts.locations.reviews.list({
+    parent: locationName,
+    pageSize: 50,
+  });
+  return res.data.reviews ?? [];
+}
+
+/** Generate an AI reply using Gemini without posting it. */
+export async function generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction) {
+  const model = getGeminiModel();
+  const instruction = customInstruction || DEFAULT_REVIEW_INSTRUCTION;
+  const prompt =
+    `${instruction}\n\n` +
+    `Write a professional, warm reply to a customer named ${reviewerName} who left this review: ` +
+    `"${reviewText}". Mention our showroom and invite them back.`;
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+/** Post a reply to a review given its full resource name. */
+export async function postReviewReply(email, reviewName, replyText) {
+  const auth = await getAuthClientByEmail(email);
+  const mybusiness = google.mybusinessreviews({ version: "v1", auth });
+  const response = await mybusiness.accounts.locations.reviews.updateReply({
+    name: reviewName,
+    requestBody: { comment: replyText },
+  });
+  return response.data;
+}
+
+/** Generate + post a reply in one call (used by auto-respond). */
 export async function handleReviewReply(
   email,
   locationName,
   reviewId,
   reviewerName,
-  reviewText
+  reviewText,
+  customInstruction
 ) {
-  const model = getGeminiModel();
-
-  const systemInstruction =
-    "You are a professional customer relations manager for a cosmetics showroom. " +
-    "When generating replies, identify any brand entities mentioned (e.g. CeraVe, The Ordinary, La Roche-Posay) " +
-    "and ensure they are linked to the location's physical presence to improve local AI search relevance. " +
-    "Keep replies warm, concise (3-4 sentences), and end with an invitation to visit again.";
-
-  const prompt =
-    `${systemInstruction}\n\n` +
-    `Write a professional, warm reply to a customer named ${reviewerName} who left this review: ` +
-    `"${reviewText}". Mention our showroom and invite them back.`;
-
-  const result = await model.generateContent(prompt);
-  const aiReply = result.response.text();
-
-  const auth = await getAuthClientByEmail(email);
-  const mybusiness = google.mybusinessreviews({ version: "v1", auth });
-
-  const response = await mybusiness.accounts.locations.reviews.updateReply({
-    name: `${locationName}/reviews/${reviewId}`,
-    requestBody: { comment: aiReply },
-  });
-
-  return { aiReply, apiResponse: response.data };
+  const aiReply = await generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction);
+  // reviewId may be a full resource name or just the ID suffix
+  const reviewName = reviewId.startsWith("accounts/")
+    ? reviewId
+    : `${locationName}/reviews/${reviewId}`;
+  const apiResponse = await postReviewReply(email, reviewName, aiReply);
+  return { aiReply, apiResponse };
 }
 
 // ── 2. Automated Post Creator ─────────────────────────────────────────────────
