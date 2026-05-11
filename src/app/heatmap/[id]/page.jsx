@@ -273,7 +273,7 @@ export default function HeatmapDetailPage({ params }) {
       {/* Main content: competitor table + map */}
       <div className="flex gap-6 flex-col lg:flex-row">
         {/* Competitor table */}
-        <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden lg:w-[420px] shrink-0">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-auto lg:w-[420px] shrink-0 max-h-[calc(100vh-200px)]">
           <div className="p-3 border-b border-slate-100">
             <input
               type="text"

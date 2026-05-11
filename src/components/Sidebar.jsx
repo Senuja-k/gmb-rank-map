@@ -13,8 +13,22 @@ const navItems = [
       </svg>
     ),
     children: [
-      { label: "New", href: "/new" },
+      { label: "New Scan", href: "/new" },
       { label: "History", href: "/" },
+    ],
+  },
+  {
+    section: "GBP Manager",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5m14 0h2M5 21H3M9 7h1m-1 4h1m4-4h1m-1 4h1M9 21v-4a1 1 0 011-1h4a1 1 0 011 1v4" />
+      </svg>
+    ),
+    children: [
+      { label: "Reviews", href: "/gbp/reviews" },
+      { label: "Posts", href: "/gbp/posts" },
+      { label: "Performance", href: "/gbp/performance" },
+      { label: "Connect", href: "/gbp/connect" },
     ],
   },
 ];
