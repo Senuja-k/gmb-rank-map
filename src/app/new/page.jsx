@@ -513,11 +513,11 @@ export default function NewScanPage() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl">
+    <div className="px-8 py-8 max-w-6xl">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-7">
         <h1 className="text-2xl font-bold text-[#1a2b4a]">New Heatmap Scan</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-slate-400 mt-1">
           Search for a business, draw the scan area on the map, add keywords, and run.
         </p>
       </div>
@@ -525,7 +525,7 @@ export default function NewScanPage() {
       <div className="flex gap-6 flex-col lg:flex-row">
         {/* Left: Map */}
         <div className="flex-1 min-w-0">
-          <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             {/* Map toolbar */}
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex-wrap">
               <span className="text-xs font-semibold uppercase text-slate-500 mr-2">Draw Area:</span>
@@ -571,7 +571,7 @@ export default function NewScanPage() {
 
         {/* Right: Form */}
         <div className="lg:w-[380px] shrink-0">
-          <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5 space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-5">
             {/* Business */}
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
@@ -706,13 +706,13 @@ export default function NewScanPage() {
                   <div className="flex gap-3">
                     <button
                       onClick={() => setShowConfirm(false)}
-                      className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={() => { setShowConfirm(false); runScan(true); }}
-                      className="flex-1 py-2.5 rounded-lg text-sm font-medium text-white bg-red-500 hover:bg-red-600 transition-colors"
+                      className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white bg-red-500 hover:bg-red-600 transition-colors"
                     >
                       Run Anyway
                     </button>
@@ -731,7 +731,7 @@ export default function NewScanPage() {
                   : 'bg-sky-500 hover:bg-sky-600'
               }`}
             >
-              {scanning ? "Scanning..." : overBudget ? "Run Scan (Over Limit)" : "Run Scan"}
+              {scanning ? "Scanning…" : overBudget ? "Run Scan (Over Limit)" : "Run Scan"}
             </button>
           </div>
         </div>

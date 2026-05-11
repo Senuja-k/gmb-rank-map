@@ -134,11 +134,11 @@ function ConnectPageInner() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-10 space-y-10">
+    <div className="px-8 py-8 max-w-3xl space-y-7">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-[#1a2b4a]">GBP Connect</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-slate-400 mt-1">
           Connect your Google account, choose which Business Profile locations this
           app can access, and manage access at any time.
         </p>
@@ -158,12 +158,12 @@ function ConnectPageInner() {
       )}
 
       {/* ── Connected accounts ─────────────────────────────────────────── */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-700">Connected Google Accounts</h2>
           <a
             href="/api/gbp/auth"
-            className="inline-flex items-center gap-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -290,7 +290,7 @@ function ConnectPageInner() {
       </section>
 
       {/* ── Saved locations ────────────────────────────────────────────── */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-700">Saved Locations</h2>
           <p className="text-xs text-slate-400 mt-0.5">

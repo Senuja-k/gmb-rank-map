@@ -25,7 +25,7 @@
 }
 
 body {
-  background: var(--background);
+  background: #eef1f7;
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
 }

@@ -181,38 +181,38 @@ export default function HeatmapDetailPage({ params }) {
   }));
 
   return (
-    <div className="p-6 md:p-8">
+    <div className="px-8 py-8">
       {/* Back button */}
       <Link
         href="/"
-        className="inline-flex items-center gap-1.5 text-sm text-sky-500 hover:text-sky-600 mb-5"
+        className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-sky-500 mb-5 transition-colors"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
-        View Heatmap
+        All Scans
       </Link>
 
       {/* Business info bar */}
-      <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5 mb-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
         <div className="flex flex-wrap gap-8 items-start">
           {/* Business name & info */}
           <div className="flex-1 min-w-[200px]">
-            <h1 className="text-lg font-bold text-[#1a2b4a]">
+            <h1 className="text-xl font-bold text-[#1a2b4a]">
               {scan.businessName}
             </h1>
-            <div className="flex items-center gap-4 mt-2 text-sm text-slate-500">
+            <div className="flex items-center gap-4 mt-2 text-sm text-slate-400">
               <a
                 href={`https://www.google.com/maps/place/?q=place_id:${scan.placeId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sky-500 hover:underline flex items-center gap-1"
+                className="text-sky-500 hover:text-sky-600 flex items-center gap-1 transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                Google Map
+                View on Google Maps
               </a>
             </div>
           </div>
@@ -262,7 +262,7 @@ export default function HeatmapDetailPage({ params }) {
           <div className="flex flex-col gap-2">
             <button
               onClick={handleDelete}
-              className="px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-xl hover:bg-red-600 transition-colors"
             >
               Delete
             </button>
@@ -273,7 +273,7 @@ export default function HeatmapDetailPage({ params }) {
       {/* Main content: competitor table + map */}
       <div className="flex gap-6 flex-col lg:flex-row">
         {/* Competitor table */}
-        <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-auto lg:w-[420px] shrink-0 max-h-[calc(100vh-200px)]">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-auto lg:w-[420px] shrink-0 max-h-[calc(100vh-200px)]">
           <div className="p-3 border-b border-slate-100">
             <input
               type="text"
@@ -347,7 +347,7 @@ export default function HeatmapDetailPage({ params }) {
         {/* Map + controls */}
         <div className="flex-1 min-w-0">
           {/* Map controls bar */}
-          <div className="bg-white rounded-t-lg border border-b-0 border-slate-200 px-4 py-3 flex items-center gap-4 flex-wrap">
+          <div className="bg-white rounded-t-2xl border border-b-0 border-slate-200 px-4 py-3 flex items-center gap-4 flex-wrap">
             <div className="text-sm">
               <span className="text-slate-400 mr-1.5">Date:</span>
               <span className="font-medium">{formatDate(scan.createdAt)}</span>
@@ -376,7 +376,7 @@ export default function HeatmapDetailPage({ params }) {
           {/* Map */}
           <div
             ref={mapContainerRef}
-            className="w-full h-[500px] lg:h-[600px] border border-slate-200 rounded-b-lg bg-slate-100"
+            className="w-full h-[500px] lg:h-[600px] border border-slate-200 rounded-b-2xl bg-slate-100"
           />
 
           {/* Legend */}
