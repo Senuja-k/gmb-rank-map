@@ -86,24 +86,82 @@ export async function createGbpPost(
   locationName,
   summaryText,
   imageUrl,
-  ctaUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://yourwebsite.com"
+  ctaUrl,
+  topicType = "STANDARD",
+  eventData = null,
+  offerData = null
 ) {
   const auth = await getAuthClientByEmail(email);
   const postsClient = google.mybusinesses({ version: "v4", auth });
 
+  const requestBody = {
+    languageCode: "en-US",
+    summary: summaryText,
+    topicType,
+    callToAction: {
+      actionType: "LEARN_MORE",
+      url: ctaUrl || process.env.NEXT_PUBLIC_SITE_URL || "https://yourwebsite.com",
+    },
+    ...(imageUrl && { media: [{ mediaFormat: "PHOTO", sourceUrl: imageUrl }] }),
+  };
+
+  if (topicType === "EVENT" && eventData) {
+    requestBody.event = {
+      title: eventData.title || "Event",
+      schedule: {
+        ...(eventData.startDate && { startDate: eventData.startDate }),
+        ...(eventData.endDate && { endDate: eventData.endDate }),
+      },
+    };
+  }
+
+  if (topicType === "OFFER" && offerData) {
+    requestBody.offer = {
+      ...(offerData.couponCode && { couponCode: offerData.couponCode }),
+      ...(offerData.redeemUrl && { redeemOnlineUrl: offerData.redeemUrl }),
+      ...(offerData.terms && { termsConditions: offerData.terms }),
+    };
+  }
+
   const response = await postsClient.accounts.locations.localPosts.create({
     parent: locationName,
-    requestBody: {
-      languageCode: "en-US",
-      summary: summaryText,
-      callToAction: { actionType: "LEARN_MORE", url: ctaUrl },
-      ...(imageUrl && {
-        media: [{ mediaFormat: "PHOTO", sourceUrl: imageUrl }],
-      }),
-    },
+    requestBody,
   });
 
   return response.data;
+}
+
+/** Generate a post title + content from an image using Gemini vision. */
+export async function generatePostContentFromImage(imageBase64, mimeType, postType = "UPDATE") {
+  const model = getGeminiModel();
+  const typeLabel =
+    postType === "OFFER" ? "a special offer" :
+    postType === "EVENT" ? "an upcoming event" :
+    "a business update";
+  const prompt =
+    `You are a social media manager for a cosmetics showroom. Analyse this product image and create ${typeLabel} Google Business Profile post.\n` +
+    `Return ONLY valid JSON (no markdown fences) with exactly two keys:\n` +
+    `- "title": Short catchy title, max 10 words.\n` +
+    `- "content": Post body, max 280 characters, mention visible brands/products and link them to the physical showroom for local SEO.`;
+
+  const result = await model.generateContent([
+    prompt,
+    { inlineData: { data: imageBase64, mimeType } },
+  ]);
+
+  const raw = result.response.text().trim()
+    .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "");
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const titleMatch = raw.match(/"title"\s*:\s*"([^"]+)"/);
+    const contentMatch = raw.match(/"content"\s*:\s*"([^"]+)"/);
+    return {
+      title: titleMatch?.[1] ?? "New at Our Showroom",
+      content: contentMatch?.[1] ?? raw.slice(0, 280),
+    };
+  }
 }
 
 export async function generateAndPublishPost(

@@ -1,15 +1,20 @@
 /**
  * POST /api/gbp/posts
  *
- * Two modes, selected by the "mode" field:
+ * Publishes a post to a single GBP location.
  *
- * mode = "generate"  →  Gemini writes + publishes the post
- * Body: { accountId, locationName, topic, imageUrl? }
- *
- * mode = "manual"    →  Publish pre-written text
- * Body: { accountId, locationName, summaryText, imageUrl?, ctaUrl? }
- *
- * Returns: { postText?, apiResponse }
+ * Body: {
+ *   email, locationName,
+ *   summaryText,          // required — post body text
+ *   imageUrl?,            // public image URL
+ *   ctaUrl?,              // call-to-action URL
+ *   topicType?,           // "STANDARD" | "OFFER" | "EVENT" (default STANDARD)
+ *   eventData?,           // { title, startDate: {year,month,day}, endDate: {year,month,day} }
+ *   offerData?,           // { couponCode?, redeemUrl?, terms? }
+ *   // Legacy mode support:
+ *   mode?,                // "generate" uses Gemini from topic field
+ *   topic?,               // used when mode = "generate"
+ * }
  */
 
 import { NextResponse } from "next/server";
@@ -23,7 +28,18 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { mode = "generate", email, locationName } = body;
+  const {
+    mode,
+    email,
+    locationName,
+    summaryText,
+    imageUrl = "",
+    ctaUrl = "",
+    topicType = "STANDARD",
+    eventData = null,
+    offerData = null,
+    topic,
+  } = body;
 
   if (!email || !locationName) {
     return NextResponse.json(
@@ -33,45 +49,30 @@ export async function POST(request) {
   }
 
   try {
-    if (mode === "generate") {
-      const { topic, imageUrl = "" } = body;
-      if (!topic) {
-        return NextResponse.json(
-          { error: "Field 'topic' is required for mode=generate." },
-          { status: 400 }
-        );
-      }
-      const result = await generateAndPublishPost(
-        email,
-        locationName,
-        topic,
-        imageUrl
-      );
+    // Legacy: mode=generate uses Gemini from topic text
+    if (mode === "generate" && topic) {
+      const result = await generateAndPublishPost(email, locationName, topic, imageUrl);
       return NextResponse.json(result);
     }
 
-    if (mode === "manual") {
-      const { summaryText, imageUrl = "", ctaUrl } = body;
-      if (!summaryText) {
-        return NextResponse.json(
-          { error: "Field 'summaryText' is required for mode=manual." },
-          { status: 400 }
-        );
-      }
-      const apiResponse = await createGbpPost(
-        email,
-        locationName,
-        summaryText,
-        imageUrl,
-        ctaUrl
+    if (!summaryText) {
+      return NextResponse.json(
+        { error: "Field 'summaryText' is required." },
+        { status: 400 }
       );
-      return NextResponse.json({ apiResponse });
     }
 
-    return NextResponse.json(
-      { error: "Invalid mode. Use 'generate' or 'manual'." },
-      { status: 400 }
+    const apiResponse = await createGbpPost(
+      email,
+      locationName,
+      summaryText,
+      imageUrl,
+      ctaUrl,
+      topicType,
+      eventData,
+      offerData
     );
+    return NextResponse.json({ apiResponse });
   } catch (err) {
     console.error("[GBP posts]", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
