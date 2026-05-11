@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function ConnectPage() {
+function ConnectPageInner() {
   const searchParams = useSearchParams();
   const justConnected = searchParams.get("connected"); // email from redirect
 
@@ -345,5 +345,13 @@ export default function ConnectPage() {
         )}
       </section>
     </div>
+  );
+}
+
+export default function ConnectPage() {
+  return (
+    <Suspense>
+      <ConnectPageInner />
+    </Suspense>
   );
 }
