@@ -49,7 +49,6 @@ export async function exchangeCodeAndSave(code) {
 
   const { error } = await supabase.from("gbp_tokens").upsert({
     account_id: email,
-    google_email: email,
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
     expiry_date: tokens.expiry_date,
@@ -107,7 +106,7 @@ export async function getAuthClientByEmail(email) {
 export async function listConnectedAccounts() {
   const { data, error } = await supabase
     .from("gbp_tokens")
-    .select("account_id, google_email, updated_at")
+    .select("account_id, updated_at")
     .order("updated_at", { ascending: false });
 
   if (error) throw new Error(error.message);
