@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "GMB Rank Map",
-  description: "Google Business Profile geo-grid rank tracker",
+  title: "GBP Manager",
+  description: "Google Business Profile management suite — rank tracking, reviews, posts & performance",
 };
 
 export default function RootLayout({ children }) {
