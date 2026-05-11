@@ -28,7 +28,10 @@ export function getAuthUrl() {
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/business.manage"],
+    scope: [
+      "https://www.googleapis.com/auth/business.manage",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
   });
 }
 
