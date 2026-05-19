@@ -104,14 +104,29 @@ export default function NewScanPage() {
   const [error, setError] = useState("");
 
   // Budget state
-  const [budget, setBudget] = useState(null);
+  const [budgets, setBudgets] = useState(null); // array of 4
+  const [activeKeyIndex, setActiveKeyIndex] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // ── Sync activeKeyIndex from localStorage ─────────────────────────────────
+  useEffect(() => {
+    const stored = parseInt(localStorage.getItem("activeApiKeyIndex") ?? "0", 10);
+    setActiveKeyIndex(Number.isFinite(stored) ? stored : 0);
+    const onStorage = (e) => {
+      if (e.key === "activeApiKeyIndex") {
+        const v = parseInt(e.newValue ?? "0", 10);
+        setActiveKeyIndex(Number.isFinite(v) ? v : 0);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // ── Fetch budget on mount ─────────────────────────────────────────────────
   useEffect(() => {
     fetch("/api/budget")
       .then((r) => r.json())
-      .then((d) => setBudget(d))
+      .then((d) => setBudgets(d))
       .catch(() => {});
   }, []);
 
@@ -466,6 +481,7 @@ export default function NewScanPage() {
             spacingKm,
             customGrid: pointsToScan,
             force,
+            apiKeyIndex: activeKeyIndex,
           }),
         });
 
@@ -488,7 +504,7 @@ export default function NewScanPage() {
       setError(err instanceof Error ? err.message : "Scan failed.");
       setScanning(false);
     }
-  }, [place, keywords, gridSize, spacingKm, drawnShape, gridPoints, router]);
+  }, [place, keywords, gridSize, spacingKm, drawnShape, gridPoints, router, activeKeyIndex]);
 
   const totalPoints = gridPoints.length > 0 ? gridPoints.length : gridSize * gridSize;
 
@@ -496,10 +512,11 @@ export default function NewScanPage() {
   const validKw = keywords.filter((k) => k.trim()).length || 1;
   const totalScans = totalPoints * validKw;
   const usesTextSearch = keywords.some((k) => k.trim().length > 0);
-  const relevantRemaining = budget
+  const activeBudget = budgets?.[activeKeyIndex] ?? null;
+  const relevantRemaining = activeBudget
     ? usesTextSearch
-      ? budget.textSearchRemaining
-      : budget.nearbySearchRemaining
+      ? activeBudget.textSearchRemaining
+      : activeBudget.nearbySearchRemaining
     : Infinity;
   const overBudget = totalScans > relevantRemaining;
   const overBy = totalScans - relevantRemaining;

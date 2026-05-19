@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canAffordScan, recordSpend, getBudgetStatus } from "@/lib/budget";
+import { canAffordScan, recordSpend, getBudgetStatus, API_KEY_COUNT } from "@/lib/budget";
 import {
   generateId,
   saveScan,
@@ -122,14 +122,6 @@ async function rankAtPoint(point, keyword, targetPlaceId, apiKey) {
 // ── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(req) {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "GOOGLE_MAPS_API_KEY is not configured on the server." },
-      { status: 500 }
-    );
-  }
-
   let body;
   try {
     body = await req.json();
@@ -137,7 +129,23 @@ export async function POST(req) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { targetPlaceId, businessName, keyword, center, gridSize, spacingKm, customGrid, force } = body;
+  const { targetPlaceId, businessName, keyword, center, gridSize, spacingKm, customGrid, force, apiKeyIndex: rawKeyIndex } = body;
+
+  // Resolve the API key for this request
+  const apiKeyIndex = Number.isInteger(rawKeyIndex) && rawKeyIndex >= 0 && rawKeyIndex < API_KEY_COUNT
+    ? rawKeyIndex
+    : 0;
+  const API_KEY_ENV_NAMES = [
+    "GOOGLE_MAPS_API_KEY",
+    "GOOGLE_MAPS_API_KEY_2",
+  ];
+  const apiKey = process.env[API_KEY_ENV_NAMES[apiKeyIndex]];
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: `API key ${apiKeyIndex + 1} (${API_KEY_ENV_NAMES[apiKeyIndex]}) is not configured on the server.` },
+      { status: 500 }
+    );
+  }
 
   if (
     !targetPlaceId ||
@@ -161,13 +169,13 @@ export async function POST(req) {
   const pointCount = grid.length;
 
   // ── Budget gate ─────────────────────────────────────────────────────────
-  const budgetCheck = await canAffordScan(pointCount, usesTextSearch);
+  const budgetCheck = await canAffordScan(pointCount, usesTextSearch, apiKeyIndex);
   if (!budgetCheck.allowed && !force) {
-    const status = await getBudgetStatus();
+    const status = await getBudgetStatus(apiKeyIndex);
     const apiName = usesTextSearch ? "Text Search" : "Nearby Search";
     return NextResponse.json(
       {
-        error: `Monthly free limit reached for ${apiName} (${budgetCheck.remaining} of ${budgetCheck.limit} free calls remaining). Resets next month.`,
+        error: `Monthly free limit reached for ${apiName} on Key ${apiKeyIndex + 1} (${budgetCheck.remaining} of ${budgetCheck.limit} free calls remaining). Resets next month.`,
         budget: status,
       },
       { status: 429 }
@@ -188,8 +196,8 @@ export async function POST(req) {
   }
 
   // ── Record spend ──────────────────────────────────────────────────────
-  await recordSpend(grid.length, usesTextSearch);
-  const budgetStatus = await getBudgetStatus();
+  await recordSpend(grid.length, usesTextSearch, apiKeyIndex);
+  const budgetStatus = await getBudgetStatus(apiKeyIndex);
 
   // ── Build competitor summaries & stats ─────────────────────────────────
   const competitors = buildCompetitorSummaries(results, targetPlaceId);

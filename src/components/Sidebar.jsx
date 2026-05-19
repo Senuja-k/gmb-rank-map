@@ -71,16 +71,47 @@ const navItems = [
   },
 ];
 
+const API_KEY_COUNT = 2;
+
+function getStoredKeyIndex() {
+  if (typeof window === "undefined") return 0;
+  const v = parseInt(localStorage.getItem("activeApiKeyIndex") ?? "0", 10);
+  return Number.isFinite(v) && v >= 0 && v < API_KEY_COUNT ? v : 0;
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
-  const [budget, setBudget] = useState(null);
+  const [budgets, setBudgets] = useState(null); // array of 4 budget objects
+  const [budgetError, setBudgetError] = useState(false);
+  const [activeKeyIndex, setActiveKeyIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveKeyIndex(getStoredKeyIndex());
+  }, []);
 
   useEffect(() => {
     fetch("/api/budget")
-      .then((r) => r.json())
-      .then((d) => setBudget(d))
-      .catch(() => {});
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((d) => {
+        if (Array.isArray(d)) {
+          setBudgets(d);
+          setBudgetError(false);
+        } else {
+          setBudgetError(true);
+        }
+      })
+      .catch(() => setBudgetError(true));
   }, [pathname]);
+
+  function switchKey(idx) {
+    setActiveKeyIndex(idx);
+    localStorage.setItem("activeApiKeyIndex", String(idx));
+    // Notify other tabs/components
+    window.dispatchEvent(new StorageEvent("storage", { key: "activeApiKeyIndex", newValue: String(idx) }));
+  }
 
   return (
     <aside
@@ -153,7 +184,17 @@ export default function Sidebar() {
       </nav>
 
       {/* Budget card */}
-      {budget && (
+      {budgetError && (
+        <>
+          <div className="mx-4 h-px bg-white/6" />
+          <div className="px-4 py-3">
+            <p className="text-[9px] text-red-400 font-medium">
+              ⚠ API Usage unavailable — run the Supabase migration
+            </p>
+          </div>
+        </>
+      )}
+      {budgets && !budgetError && (
         <>
           <div className="mx-4 h-px bg-white/6" />
           <div className="px-4 py-4 space-y-3">
@@ -161,36 +202,72 @@ export default function Sidebar() {
               API Usage
             </p>
 
-            {[
-              { label: "Text Search", used: budget.textSearchCalls, limit: budget.textSearchLimit },
-              { label: "Nearby Search", used: budget.nearbySearchCalls, limit: budget.nearbySearchLimit },
-            ].map(({ label, used, limit }) => {
-              const pct = Math.min(100, (used / limit) * 100);
-              const color = pct > 90 ? "#ef4444" : pct > 70 ? "#f59e0b" : "#22c55e";
-              return (
-                <div key={label}>
-                  <div className="flex justify-between items-baseline mb-1">
-                    <span className="text-[10px] text-slate-500">{label}</span>
-                    <span className="text-[10px] text-slate-600 tabular-nums">
-                      {used.toLocaleString()}<span className="text-slate-700">/{limit.toLocaleString()}</span>
-                    </span>
-                  </div>
-                  <div className="w-full h-1 rounded-full bg-white/6 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-700"
-                      style={{ width: `${pct}%`, background: color }}
+            {/* Key switcher */}
+            <div className="flex gap-1">
+              {Array.from({ length: API_KEY_COUNT }, (_, i) => {
+                const kb = budgets[i];
+                const pct = kb ? Math.min(100, ((kb.textSearchCalls + kb.nearbySearchCalls) / (kb.totalFreeLimit)) * 100) : 0;
+                const dot = pct > 90 ? "#ef4444" : pct > 70 ? "#f59e0b" : "#22c55e";
+                const isActive = i === activeKeyIndex;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => switchKey(i)}
+                    title={`Key ${i + 1} — ${kb ? `${(kb.textSearchCalls + kb.nearbySearchCalls).toLocaleString()} / ${kb.totalFreeLimit.toLocaleString()}` : "unknown"}`}
+                    className={`flex-1 py-1.5 rounded-md text-[10px] font-semibold transition-all flex flex-col items-center gap-0.5 ${
+                      isActive
+                        ? "bg-sky-500/25 text-sky-300 ring-1 ring-sky-500/50"
+                        : "bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300"
+                    }`}
+                  >
+                    <span>{i + 1}</span>
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: pct > 0 ? dot : "#374151" }}
                     />
-                  </div>
-                </div>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
 
-            {budget.blocked && (
-              <div className="flex items-center gap-1.5 text-[10px] font-medium text-red-400 mt-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse shrink-0" />
-                Limit reached
-              </div>
-            )}
+            {/* Active key usage bars */}
+            {(() => {
+              const kb = budgets[activeKeyIndex];
+              if (!kb) return null;
+              return (
+                <>
+                  {[
+                    { label: "Text Search", used: kb.textSearchCalls, limit: kb.textSearchLimit },
+                    { label: "Nearby Search", used: kb.nearbySearchCalls, limit: kb.nearbySearchLimit },
+                  ].map(({ label, used, limit }) => {
+                    const pct = Math.min(100, (used / limit) * 100);
+                    const color = pct > 90 ? "#ef4444" : pct > 70 ? "#f59e0b" : "#22c55e";
+                    return (
+                      <div key={label}>
+                        <div className="flex justify-between items-baseline mb-1">
+                          <span className="text-[10px] text-slate-500">{label}</span>
+                          <span className="text-[10px] text-slate-600 tabular-nums">
+                            {used.toLocaleString()}<span className="text-slate-700">/{limit.toLocaleString()}</span>
+                          </span>
+                        </div>
+                        <div className="w-full h-1 rounded-full bg-white/6 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${pct}%`, background: color }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {kb.blocked && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-red-400 mt-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse shrink-0" />
+                      Key {activeKeyIndex + 1} limit reached
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </>
       )}
