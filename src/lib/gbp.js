@@ -13,12 +13,17 @@ import { getAuthClientByEmail } from "./gbp-auth";
 
 // Valid model IDs accepted from the client
 const ALLOWED_GEMINI_MODELS = new Set([
+  "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
+  "gemini-3.0-flash",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   // keep env-configured models in the allow-list at runtime
   process.env.GEMINI_MODEL,
   process.env.GEMINI_MODEL_FLASH,
+  process.env.GEMINI_MODEL_3_5_FLASH,
+  process.env.GEMINI_MODEL_3_0_FLASH,
+  process.env.GEMINI_MODEL_2_5_FLASH_LITE,
 ].filter(Boolean));
 
 function getGeminiModel(modelOverride) {
@@ -44,14 +49,26 @@ const DEFAULT_REVIEW_INSTRUCTION =
 
 // ── 1. Review helpers ─────────────────────────────────────────────────────────
 
-/** Fetch all reviews for a single location (up to 50). */
+/** Fetch all reviews for a single location. */
 export async function fetchReviewsForLocation(email, locationName) {
   const auth = await getAuthClientByEmail(email);
-  const res = await auth.request({
-    url: `https://mybusiness.googleapis.com/v4/${locationName}/reviews?pageSize=50`,
-    method: "GET",
-  });
-  return res.data.reviews ?? [];
+  const reviews = [];
+  let pageToken = "";
+
+  do {
+    const params = new URLSearchParams({ pageSize: "50" });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await auth.request({
+      url: `https://mybusiness.googleapis.com/v4/${locationName}/reviews?${params}`,
+      method: "GET",
+    });
+
+    reviews.push(...(res.data.reviews ?? []));
+    pageToken = res.data.nextPageToken ?? "";
+  } while (pageToken);
+
+  return reviews;
 }
 
 /** Fetch an image URL and return a Gemini inlineData part, or null on failure. */
@@ -186,6 +203,28 @@ export async function createGbpPost(
   });
 
   return response.data;
+}
+
+/** Fetch all published local posts for a single location. */
+export async function fetchPostsForLocation(email, locationName) {
+  const auth = await getAuthClientByEmail(email);
+  const posts = [];
+  let pageToken = "";
+
+  do {
+    const params = new URLSearchParams({ pageSize: "100" });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await auth.request({
+      url: `https://mybusiness.googleapis.com/v4/${locationName}/localPosts?${params}`,
+      method: "GET",
+    });
+
+    posts.push(...(res.data.localPosts ?? []));
+    pageToken = res.data.nextPageToken ?? "";
+  } while (pageToken);
+
+  return posts;
 }
 
 const DEFAULT_POST_PROMPT =

@@ -18,8 +18,53 @@
  */
 
 import { NextResponse } from "next/server";
-import { generateAndPublishPost, createGbpPost } from "@/lib/gbp";
+import { generateAndPublishPost, createGbpPost, fetchPostsForLocation } from "@/lib/gbp";
 import { supabase } from "@/lib/supabase";
+
+/**
+ * GET /api/gbp/posts
+ * Returns published posts from all saved+enabled GBP locations.
+ * This is read-only and is used by the live assistant.
+ */
+export async function GET() {
+  try {
+    const { data: locations, error } = await supabase
+      .from("gbp_locations")
+      .select("location_name, account_name, display_name, google_email")
+      .eq("is_enabled", true);
+
+    if (error) throw new Error(error.message);
+    if (!locations?.length) return NextResponse.json({ posts: [] });
+
+    const results = await Promise.allSettled(
+      locations.map(async (loc) => {
+        const parent = loc.location_name.startsWith("accounts/")
+          ? loc.location_name
+          : `${loc.account_name}/${loc.location_name}`;
+        const posts = await fetchPostsForLocation(loc.google_email, parent);
+        return posts.map((p) => ({
+          ...p,
+          locationName: loc.location_name,
+          locationDisplayName: loc.display_name,
+          email: loc.google_email,
+        }));
+      })
+    );
+
+    const posts = results
+      .filter((r) => r.status === "fulfilled")
+      .flatMap((r) => r.value);
+
+    const fetchErrors = results
+      .map((r, i) => r.status === "rejected" ? `${locations[i].display_name}: ${r.reason?.message ?? r.reason}` : null)
+      .filter(Boolean);
+
+    return NextResponse.json({ posts, fetchErrors: fetchErrors.length ? fetchErrors : undefined });
+  } catch (err) {
+    console.error("[GBP posts list]", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
 
 export async function POST(request) {
   let body;

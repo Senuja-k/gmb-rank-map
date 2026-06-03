@@ -3,14 +3,15 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 
-const AI_INSTRUCTION_KEY = "gbp_ai_instruction";
 const AI_MODEL_KEY = "gbp_gemini_model";
 const MODEL_USAGE_KEY = "gbp_model_usage";
 
 const GEMINI_MODELS = [
-  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",    rpd: 500, rpm: 15 },
-  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded",   rpd: 20,  rpm: 5  },
-  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",    description: "Legacy · deprecated",  rpd: 20,  rpm: 10 },
+  { id: "gemini-3.5-flash",      label: "3.5 Flash",      badgeColor: "bg-violet-100 text-violet-700",   description: "Latest · capable",  rpd: 20,  rpm: 5  },
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",  rpd: 500, rpm: 15 },
+  { id: "gemini-3.0-flash",      label: "3.0 Flash",      badgeColor: "bg-teal-100 text-teal-700",       description: "Fast · reliable",   rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded", rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite · low-cost",   rpd: 20,  rpm: 10 },
 ];
 const DEFAULT_MODEL = GEMINI_MODELS[0].id;
 
@@ -79,12 +80,18 @@ export default function ReviewsPage() {
   const [rateLimitUntil, setRateLimitUntil] = useState(null); // Date object
   const [rateLimitSecsLeft, setRateLimitSecsLeft] = useState(0);
   const [serviceUnavailable, setServiceUnavailable] = useState(false);
+  const [savingInstruction, setSavingInstruction] = useState(false);
   const [geminiModel, setGeminiModel] = useState(DEFAULT_MODEL);
   const [modelUsage, setModelUsage] = useState({});
 
   useEffect(() => {
-    const saved = localStorage.getItem(AI_INSTRUCTION_KEY);
-    if (saved) { setInstruction(saved); setInstructionDraft(saved); }
+    (async () => {
+      try {
+        const res = await fetch("/api/gbp/reviews/prompt");
+        const data = await res.json();
+        if (data.prompt) { setInstruction(data.prompt); setInstructionDraft(data.prompt); }
+      } catch { /* keep default */ }
+    })();
     const savedModel = localStorage.getItem(AI_MODEL_KEY);
     if (savedModel && GEMINI_MODELS.some((m) => m.id === savedModel)) {
       setGeminiModel(savedModel);
@@ -130,7 +137,19 @@ export default function ReviewsPage() {
   }
   function selectAllUnanswered() { setSelected(new Set(unansweredFiltered.map((r) => r.name))); }
   function clearSelection() { setSelected(new Set()); }
-  function saveInstruction() { localStorage.setItem(AI_INSTRUCTION_KEY, instructionDraft); setInstruction(instructionDraft); setShowSettings(false); }
+  async function saveInstruction() {
+    setSavingInstruction(true);
+    try {
+      const res = await fetch("/api/gbp/reviews/prompt", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: instructionDraft }),
+      });
+      if (res.ok) { setInstruction(instructionDraft); setShowSettings(false); }
+    } finally {
+      setSavingInstruction(false);
+    }
+  }
   function selectModel(id) { setGeminiModel(id); localStorage.setItem(AI_MODEL_KEY, id); }
 
   async function handleAutoRespond() {
@@ -372,7 +391,7 @@ export default function ReviewsPage() {
 
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-800">AI Reply Settings</h2>
               <button onClick={() => setShowSettings(false)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -414,13 +433,13 @@ export default function ReviewsPage() {
             {/* Instruction textarea */}
             <div>
               <p className="text-xs font-semibold text-slate-700 mb-1.5">Reply Instructions</p>
-              <p className="text-xs text-slate-500 mb-2">This prompt tells Gemini how to write replies. It&apos;s saved in your browser.</p>
+              <p className="text-xs text-slate-500 mb-2">This prompt tells Gemini how to write replies. Saved to the database and shared across devices.</p>
               <textarea value={instructionDraft} onChange={(e) => setInstructionDraft(e.target.value)} rows={6} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none" />
             </div>
 
             <div className="flex justify-end gap-2">
               <button onClick={() => setInstructionDraft(DEFAULT_INSTRUCTION)} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">Reset to default</button>
-              <button onClick={saveInstruction} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 text-white px-4 py-1.5 rounded-lg transition-colors">Save</button>
+              <button onClick={saveInstruction} disabled={savingInstruction} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors">{savingInstruction ? "Saving…" : "Save"}</button>
             </div>
           </div>
         </div>

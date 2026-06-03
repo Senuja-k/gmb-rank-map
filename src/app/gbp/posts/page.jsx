@@ -8,9 +8,11 @@ const AI_MODEL_KEY = "gbp_gemini_model";
 const MODEL_USAGE_KEY = "gbp_model_usage";
 
 const GEMINI_MODELS = [
-  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",    rpd: 500, rpm: 15 },
-  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded",   rpd: 20,  rpm: 5  },
-  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",    description: "Legacy · deprecated",  rpd: 20,  rpm: 10 },
+  { id: "gemini-3.5-flash",      label: "3.5 Flash",      badgeColor: "bg-violet-100 text-violet-700",   description: "Latest · capable",  rpd: 20,  rpm: 5  },
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",  rpd: 500, rpm: 15 },
+  { id: "gemini-3.0-flash",      label: "3.0 Flash",      badgeColor: "bg-teal-100 text-teal-700",       description: "Fast · reliable",   rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded", rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite · low-cost",   rpd: 20,  rpm: 10 },
 ];
 const DEFAULT_MODEL = GEMINI_MODELS[0].id;
 
@@ -987,7 +989,7 @@ export default function PostsPage() {
       {/* Prompt Settings modal */}
       {showPromptSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
               <div>
                 <h2 className="text-base font-bold text-slate-800">AI Settings</h2>
