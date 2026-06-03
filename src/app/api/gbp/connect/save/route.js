@@ -26,7 +26,7 @@ export async function POST(request) {
     );
   }
 
-  const rows = locations.map((loc) => ({
+  const rawRows = locations.map((loc) => ({
     location_name: loc.locationName,
     account_name: loc.accountName,
     display_name: loc.displayName,
@@ -34,6 +34,12 @@ export async function POST(request) {
     google_email: email,
     is_enabled: loc.isEnabled ?? true,
   }));
+
+  // Deduplicate by location_name before upsert to avoid
+  // "ON CONFLICT DO UPDATE command cannot affect a row a second time"
+  const rowMap = new Map();
+  rawRows.forEach((row) => rowMap.set(row.location_name, row));
+  const rows = Array.from(rowMap.values());
 
   const { error } = await supabase
     .from("gbp_locations")

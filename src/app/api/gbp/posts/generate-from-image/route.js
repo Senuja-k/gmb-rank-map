@@ -9,7 +9,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { imageBase64, mimeType, postType = "UPDATE" } = body;
+  const { imageBase64, mimeType, postType = "UPDATE", customPrompt = "", geminiModel } = body;
 
   if (!imageBase64 || !mimeType) {
     return NextResponse.json(
@@ -19,7 +19,7 @@ export async function POST(request) {
   }
 
   try {
-    const result = await generatePostContentFromImage(imageBase64, mimeType, postType);
+    const result = await generatePostContentFromImage(imageBase64, mimeType, postType, customPrompt, geminiModel);
     return NextResponse.json(result);
   } catch (err) {
     console.error("[generate-from-image]", err);

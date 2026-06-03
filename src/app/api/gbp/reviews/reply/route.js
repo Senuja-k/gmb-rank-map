@@ -25,7 +25,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { email, locationName, reviewId, reviewerName, reviewText, customInstruction } = body;
+  const { email, locationName, reviewId, reviewerName, reviewText, customInstruction, reviewPhotos, geminiModel } = body;
 
   if (!email || !locationName || !reviewId || !reviewerName || !reviewText) {
     return NextResponse.json(
@@ -44,11 +44,28 @@ export async function POST(request) {
       reviewId,
       reviewerName,
       reviewText,
-      customInstruction
+      customInstruction,
+      Array.isArray(reviewPhotos) ? reviewPhotos : [],
+      geminiModel
     );
     return NextResponse.json(result);
   } catch (err) {
     console.error("[GBP reviews/reply]", err);
+
+    if (err.status === 429 || err.message?.includes("429")) {
+      return NextResponse.json(
+        { error: "Gemini rate limit reached. Please wait before generating more replies." },
+        { status: 429 }
+      );
+    }
+
+    if (err.status === 503 || err.message?.includes("503") || err.message?.includes("Service Unavailable")) {
+      return NextResponse.json(
+        { error: "Gemini is temporarily unavailable due to high demand. Please try again in a moment." },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

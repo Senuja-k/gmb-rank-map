@@ -116,14 +116,21 @@ export async function listConnectedAccounts() {
   return data ?? [];
 }
 
-/** Disconnect a Google account by deleting its tokens. */
+/** Disconnect a Google account by deleting its tokens and all associated locations. */
 export async function disconnectAccount(email) {
-  const { error } = await supabase
+  const { error: tokensError } = await supabase
     .from("gbp_tokens")
     .delete()
     .eq("account_id", email);
 
-  if (error) throw new Error(error.message);
+  if (tokensError) throw new Error(tokensError.message);
+
+  const { error: locsError } = await supabase
+    .from("gbp_locations")
+    .delete()
+    .eq("google_email", email);
+
+  if (locsError) throw new Error(locsError.message);
 }
 
 /** List GBP accounts visible to the connected Google email. */

@@ -11,12 +11,29 @@ import { getAuthClientByEmail } from "./gbp-auth";
 
 // ── Gemini setup ─────────────────────────────────────────────────────────────
 
-function getGeminiModel() {
+// Valid model IDs accepted from the client
+const ALLOWED_GEMINI_MODELS = new Set([
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  // keep env-configured models in the allow-list at runtime
+  process.env.GEMINI_MODEL,
+  process.env.GEMINI_MODEL_FLASH,
+].filter(Boolean));
+
+function getGeminiModel(modelOverride) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Missing GEMINI_API_KEY env var.");
 
+  const modelName =
+    (modelOverride && ALLOWED_GEMINI_MODELS.has(modelOverride)
+      ? modelOverride
+      : null) ??
+    process.env.GEMINI_MODEL ??
+    "gemini-3.1-flash-lite";
+
   const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+  return genAI.getGenerativeModel({ model: modelName });
 }
 
 const DEFAULT_REVIEW_INSTRUCTION =
@@ -30,22 +47,53 @@ const DEFAULT_REVIEW_INSTRUCTION =
 /** Fetch all reviews for a single location (up to 50). */
 export async function fetchReviewsForLocation(email, locationName) {
   const auth = await getAuthClientByEmail(email);
-  const mybusiness = google.mybusinessreviews({ version: "v1", auth });
-  const res = await mybusiness.accounts.locations.reviews.list({
-    parent: locationName,
-    pageSize: 50,
+  const res = await auth.request({
+    url: `https://mybusiness.googleapis.com/v4/${locationName}/reviews?pageSize=50`,
+    method: "GET",
   });
   return res.data.reviews ?? [];
 }
 
-/** Generate an AI reply using Gemini without posting it. */
-export async function generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction) {
-  const model = getGeminiModel();
+/** Fetch an image URL and return a Gemini inlineData part, or null on failure. */
+async function fetchImagePart(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buffer = await res.arrayBuffer();
+    const mimeType = res.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+    const base64 = Buffer.from(buffer).toString("base64");
+    return { inlineData: { data: base64, mimeType } };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate an AI reply using Gemini without posting it.
+ * @param {string[]} reviewPhotoUrls  Optional array of photo URLs from the review.
+ */
+export async function generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction, reviewPhotoUrls = [], geminiModel) {
+  const model = getGeminiModel(geminiModel);
   const instruction = customInstruction || DEFAULT_REVIEW_INSTRUCTION;
+  const reviewContent = reviewText
+    ? `who left this review: "${reviewText}"`
+    : `who left a star rating without a written comment`;
+  const photoContext = reviewPhotoUrls.length
+    ? ` The reviewer also attached ${reviewPhotoUrls.length} photo(s) to their review — analyse them and reference any visible products or brands in your reply.`
+    : "";
   const prompt =
     `${instruction}\n\n` +
-    `Write a professional, warm reply to a customer named ${reviewerName} who left this review: ` +
-    `"${reviewText}". Mention our showroom and invite them back.`;
+    `Write a professional, warm reply to a customer named ${reviewerName} ` +
+    `${reviewContent}.${photoContext} Mention our showroom and invite them back.`;
+
+  if (reviewPhotoUrls.length) {
+    const imageParts = (await Promise.all(reviewPhotoUrls.map(fetchImagePart))).filter(Boolean);
+    if (imageParts.length) {
+      const result = await model.generateContent([prompt, ...imageParts]);
+      return result.response.text();
+    }
+  }
+
   const result = await model.generateContent(prompt);
   return result.response.text();
 }
@@ -53,10 +101,10 @@ export async function generateReplyOnly(email, locationName, reviewerName, revie
 /** Post a reply to a review given its full resource name. */
 export async function postReviewReply(email, reviewName, replyText) {
   const auth = await getAuthClientByEmail(email);
-  const mybusiness = google.mybusinessreviews({ version: "v1", auth });
-  const response = await mybusiness.accounts.locations.reviews.updateReply({
-    name: reviewName,
-    requestBody: { comment: replyText },
+  const response = await auth.request({
+    url: `https://mybusiness.googleapis.com/v4/${reviewName}/reply`,
+    method: "PUT",
+    data: { comment: replyText },
   });
   return response.data;
 }
@@ -68,9 +116,11 @@ export async function handleReviewReply(
   reviewId,
   reviewerName,
   reviewText,
-  customInstruction
+  customInstruction,
+  reviewPhotoUrls = [],
+  geminiModel
 ) {
-  const aiReply = await generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction);
+  const aiReply = await generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction, reviewPhotoUrls, geminiModel);
   // reviewId may be a full resource name or just the ID suffix
   const reviewName = reviewId.startsWith("accounts/")
     ? reviewId
@@ -89,28 +139,34 @@ export async function createGbpPost(
   ctaUrl,
   topicType = "STANDARD",
   eventData = null,
-  offerData = null
+  offerData = null,
+  ctaActionType = "LEARN_MORE"
 ) {
   const auth = await getAuthClientByEmail(email);
-  const postsClient = google.mybusinesses({ version: "v4", auth });
 
   const requestBody = {
     languageCode: "en-US",
     summary: summaryText,
     topicType,
-    callToAction: {
-      actionType: "LEARN_MORE",
-      url: ctaUrl || process.env.NEXT_PUBLIC_SITE_URL || "https://yourwebsite.com",
-    },
+    ...(topicType !== "OFFER" && ctaActionType !== "NONE" && {
+      callToAction: {
+        actionType: ctaActionType,
+        ...(ctaActionType !== "CALL" && {
+          url: ctaUrl || process.env.NEXT_PUBLIC_SITE_URL || "https://yourwebsite.com",
+        }),
+      },
+    }),
     ...(imageUrl && { media: [{ mediaFormat: "PHOTO", sourceUrl: imageUrl }] }),
   };
 
-  if (topicType === "EVENT" && eventData) {
+  if ((topicType === "EVENT" || topicType === "OFFER") && eventData) {
     requestBody.event = {
-      title: eventData.title || "Event",
+      title: eventData.title || (topicType === "OFFER" ? "Offer" : "Event"),
       schedule: {
         ...(eventData.startDate && { startDate: eventData.startDate }),
+        ...(eventData.startTime && { startTime: eventData.startTime }),
         ...(eventData.endDate && { endDate: eventData.endDate }),
+        ...(eventData.endTime && { endTime: eventData.endTime }),
       },
     };
   }
@@ -123,26 +179,35 @@ export async function createGbpPost(
     };
   }
 
-  const response = await postsClient.accounts.locations.localPosts.create({
-    parent: locationName,
-    requestBody,
+  const response = await auth.request({
+    url: `https://mybusiness.googleapis.com/v4/${locationName}/localPosts`,
+    method: "POST",
+    data: requestBody,
   });
 
   return response.data;
 }
 
+const DEFAULT_POST_PROMPT =
+  "You are a social media manager for a cosmetics showroom. " +
+  "Analyse this product image and create {typeLabel} Google Business Profile post. " +
+  "Mention visible brands/products and link them to the physical showroom for local SEO.";
+
 /** Generate a post title + content from an image using Gemini vision. */
-export async function generatePostContentFromImage(imageBase64, mimeType, postType = "UPDATE") {
-  const model = getGeminiModel();
+export async function generatePostContentFromImage(imageBase64, mimeType, postType = "UPDATE", customPrompt = "", geminiModel) {
+  const model = getGeminiModel(geminiModel);
   const typeLabel =
     postType === "OFFER" ? "a special offer" :
     postType === "EVENT" ? "an upcoming event" :
     "a business update";
+  const baseInstruction = customPrompt?.trim()
+    ? customPrompt.trim()
+    : DEFAULT_POST_PROMPT.replace("{typeLabel}", typeLabel);
   const prompt =
-    `You are a social media manager for a cosmetics showroom. Analyse this product image and create ${typeLabel} Google Business Profile post.\n` +
+    `${baseInstruction}\n\n` +
     `Return ONLY valid JSON (no markdown fences) with exactly two keys:\n` +
     `- "title": Short catchy title, max 10 words.\n` +
-    `- "content": Post body, max 280 characters, mention visible brands/products and link them to the physical showroom for local SEO.`;
+    `- "content": Post body, max 280 characters.`;
 
   const result = await model.generateContent([
     prompt,
@@ -214,13 +279,30 @@ export async function getShowroomStats(email, locationName, dateRange = {}) {
       "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
       "BUSINESS_DIRECTION_REQUESTS",
     ],
-    "dailyRange.start_date.year": startYear,
-    "dailyRange.start_date.month": startMonth,
-    "dailyRange.start_date.day": startDay,
-    "dailyRange.end_date.year": endYear,
-    "dailyRange.end_date.month": endMonth,
-    "dailyRange.end_date.day": endDay,
+    "dailyRange.startDate.year": startYear,
+    "dailyRange.startDate.month": startMonth,
+    "dailyRange.startDate.day": startDay,
+    "dailyRange.endDate.year": endYear,
+    "dailyRange.endDate.month": endMonth,
+    "dailyRange.endDate.day": endDay,
   });
 
-  return res.data.multiDailyMetricTimeSeries ?? [];
+  const raw = res.data.multiDailyMetricTimeSeries ?? [];
+
+  // Actual shape: multiDailyMetricTimeSeries[0].dailyMetricTimeSeries[{ dailyMetric, timeSeries }]
+  const result = [];
+  for (const container of raw) {
+    for (const series of (container.dailyMetricTimeSeries ?? [])) {
+      result.push({
+        dailyMetric: series.dailyMetric,
+        timeSeries: {
+          datedValues: (series.timeSeries?.datedValues ?? []).map((dv) => ({
+            date: dv.date,
+            value: Number(dv.value ?? 0),
+          })),
+        },
+      });
+    }
+  }
+  return result;
 }

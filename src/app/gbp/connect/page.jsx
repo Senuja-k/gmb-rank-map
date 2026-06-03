@@ -120,7 +120,7 @@ function ConnectPageInner() {
   }
 
   async function disconnect(email) {
-    if (!confirm(`Disconnect ${email}? This will remove their access tokens.`)) return;
+    if (!confirm(`Disconnect ${email}? This will remove their access tokens and all saved locations for this account.`)) return;
     await fetch(
       `/api/gbp/connect/accounts?email=${encodeURIComponent(email)}`,
       { method: "DELETE" }
@@ -130,7 +130,7 @@ function ConnectPageInner() {
       delete n[email];
       return n;
     });
-    await loadAccounts();
+    await Promise.all([loadAccounts(), loadSaved()]);
   }
 
   return (

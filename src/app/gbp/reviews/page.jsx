@@ -4,6 +4,32 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 
 const AI_INSTRUCTION_KEY = "gbp_ai_instruction";
+const AI_MODEL_KEY = "gbp_gemini_model";
+const MODEL_USAGE_KEY = "gbp_model_usage";
+
+const GEMINI_MODELS = [
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",    rpd: 500, rpm: 15 },
+  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded",   rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",    description: "Legacy · deprecated",  rpd: 20,  rpm: 10 },
+];
+const DEFAULT_MODEL = GEMINI_MODELS[0].id;
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function loadRawUsage() {
+  try { return JSON.parse(localStorage.getItem(MODEL_USAGE_KEY) ?? "{}"); } catch { return {}; }
+}
+function readUsageToday() {
+  const raw = loadRawUsage(); const today = todayStr(); const out = {};
+  for (const m of GEMINI_MODELS) { const e = raw[m.id]; out[m.id] = (e?.date === today ? e.used : 0) ?? 0; }
+  return out;
+}
+function persistIncrement(modelId) {
+  const raw = loadRawUsage(); const today = todayStr(); const e = raw[modelId];
+  raw[modelId] = { date: today, used: (e?.date === today ? (e.used ?? 0) : 0) + 1 };
+  localStorage.setItem(MODEL_USAGE_KEY, JSON.stringify(raw));
+  return raw[modelId].used;
+}
+
 const DEFAULT_INSTRUCTION =
   "You are a professional customer relations manager for a cosmetics showroom. " +
   "When generating replies, identify any brand entities mentioned (e.g. CeraVe, The Ordinary, La Roche-Posay) " +
@@ -34,6 +60,7 @@ export default function ReviewsPage() {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [fetchErrors, setFetchErrors] = useState([]);
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState(new Set());
   const [instruction, setInstruction] = useState(DEFAULT_INSTRUCTION);
@@ -49,11 +76,34 @@ export default function ReviewsPage() {
   const [generatingReply, setGeneratingReply] = useState(false);
   const [postingReply, setPostingReply] = useState(false);
   const [postError, setPostError] = useState("");
+  const [rateLimitUntil, setRateLimitUntil] = useState(null); // Date object
+  const [rateLimitSecsLeft, setRateLimitSecsLeft] = useState(0);
+  const [serviceUnavailable, setServiceUnavailable] = useState(false);
+  const [geminiModel, setGeminiModel] = useState(DEFAULT_MODEL);
+  const [modelUsage, setModelUsage] = useState({});
 
   useEffect(() => {
     const saved = localStorage.getItem(AI_INSTRUCTION_KEY);
     if (saved) { setInstruction(saved); setInstructionDraft(saved); }
+    const savedModel = localStorage.getItem(AI_MODEL_KEY);
+    if (savedModel && GEMINI_MODELS.some((m) => m.id === savedModel)) {
+      setGeminiModel(savedModel);
+    }
+    setModelUsage(readUsageToday());
   }, []);
+
+  // Countdown ticker for rate-limit banner
+  useEffect(() => {
+    if (!rateLimitUntil) return;
+    const tick = () => {
+      const left = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+      if (left <= 0) { setRateLimitUntil(null); setRateLimitSecsLeft(0); }
+      else setRateLimitSecsLeft(left);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [rateLimitUntil]);
 
   const loadReviews = useCallback(async () => {
     setLoading(true); setError("");
@@ -62,7 +112,8 @@ export default function ReviewsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load reviews");
       setReviews(data.reviews ?? []);
-    } catch (err) { setError(err.message); }
+      setFetchErrors(data.fetchErrors ?? []);
+    } catch (err) { setError(err.message); setFetchErrors([]); }
     finally { setLoading(false); }
   }, []);
 
@@ -80,6 +131,7 @@ export default function ReviewsPage() {
   function selectAllUnanswered() { setSelected(new Set(unansweredFiltered.map((r) => r.name))); }
   function clearSelection() { setSelected(new Set()); }
   function saveInstruction() { localStorage.setItem(AI_INSTRUCTION_KEY, instructionDraft); setInstruction(instructionDraft); setShowSettings(false); }
+  function selectModel(id) { setGeminiModel(id); localStorage.setItem(AI_MODEL_KEY, id); }
 
   async function handleAutoRespond() {
     if (!selectedReviews.length) return;
@@ -89,9 +141,16 @@ export default function ReviewsPage() {
       try {
         const res = await fetch("/api/gbp/reviews/reply", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: review.email, locationName: review.locationName, reviewId: review.name, reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "", customInstruction: instruction }),
+          body: JSON.stringify({
+            email: review.email, locationName: review.locationName, reviewId: review.name,
+            reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "",
+            customInstruction: instruction,
+            reviewPhotos: review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [],
+            geminiModel,
+          }),
         });
         if (!res.ok) { const d = await res.json(); setAutoErrors((p) => [...p, `${review.reviewer?.displayName ?? "Review"}: ${d.error}`]); }
+        else { const c = persistIncrement(geminiModel); setModelUsage((p) => ({ ...p, [geminiModel]: c })); }
       } catch (err) { setAutoErrors((p) => [...p, `${review.reviewer?.displayName ?? "Review"}: ${err.message}`]); }
       setAutoProgress({ done: i + 1, total: selectedReviews.length });
     }
@@ -107,15 +166,32 @@ export default function ReviewsPage() {
 
   async function generateForIndex(queue, idx) {
     const review = queue[idx]; if (!review) return;
-    setGeneratingReply(true); setCurrentReply(""); setPostError("");
+    setGeneratingReply(true); setCurrentReply(""); setPostError(""); setServiceUnavailable(false);
     try {
+      const photoUrls = review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [];
       const res = await fetch("/api/gbp/reviews/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: review.email, locationName: review.locationName, reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "", customInstruction: instruction }),
+        body: JSON.stringify({ email: review.email, locationName: review.locationName, reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "", customInstruction: instruction, reviewPhotos: photoUrls, geminiModel }),
       });
-      const data = await res.json(); setCurrentReply(data.aiReply ?? "");
+      const data = await res.json();
+      if (res.status === 429) {
+        const secs = data.retryAfterSeconds ?? 60;
+        setRateLimitUntil(new Date(Date.now() + secs * 1000));
+        setRateLimitSecsLeft(secs);
+        setCurrentReply("");
+      } else if (res.status === 503) {
+        setServiceUnavailable(true);
+        setCurrentReply("");
+      } else {
+        setCurrentReply(data.aiReply ?? "");
+        if (data.aiReply) { const c = persistIncrement(geminiModel); setModelUsage((p) => ({ ...p, [geminiModel]: c })); }
+      }
     } catch { setCurrentReply(""); }
     finally { setGeneratingReply(false); }
+  }
+
+  async function retryGenerate() {
+    await generateForIndex(reviewQueue, queueIndex);
   }
 
   async function postCurrentReply() {
@@ -141,17 +217,47 @@ export default function ReviewsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10 space-y-6">
+
+      {/* Rate-limit countdown banner */}
+      {rateLimitUntil && rateLimitSecsLeft > 0 && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
+          <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-800">Gemini rate limit reached</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              You&apos;ve hit the free-tier limit (20 requests/day). You can generate again in{" "}
+              <span className="font-bold tabular-nums">
+                {rateLimitSecsLeft >= 60
+                  ? `${Math.floor(rateLimitSecsLeft / 60)}m ${rateLimitSecsLeft % 60}s`
+                  : `${rateLimitSecsLeft}s`}
+              </span>.
+            </p>
+          </div>
+          <button
+            onClick={() => setRateLimitUntil(null)}
+            className="p-1 rounded-lg hover:bg-amber-100 text-amber-400 hover:text-amber-600 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[#1a2b4a]">Reviews</h1>
           <p className="text-sm text-slate-500 mt-1">Manage and respond to reviews across all locations.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => { setInstructionDraft(instruction); setShowSettings(true); }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="AI Reply Settings">
+          <button onClick={() => { setInstructionDraft(instruction); setShowSettings(true); }} className="flex items-center gap-1.5 p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="AI Reply Settings">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
+            {(() => { const m = GEMINI_MODELS.find((x) => x.id === geminiModel); return m ? <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${m.badgeColor}`}>{m.label}</span> : null; })()}
           </button>
           <button onClick={loadReviews} disabled={loading} className="flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:border-slate-300 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
             <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -203,7 +309,14 @@ export default function ReviewsPage() {
       ) : filteredReviews.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <p className="text-sm">No reviews found.</p>
-          {reviews.length === 0 && <p className="text-xs mt-2">Make sure you have <Link href="/gbp/connect" className="text-sky-500 underline">connected locations</Link>.</p>}
+          {fetchErrors.length > 0 ? (
+            <div className="mt-4 text-left max-w-md mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
+              <p className="text-xs font-semibold text-amber-700">Could not fetch reviews from some locations:</p>
+              {fetchErrors.map((e, i) => <p key={i} className="text-xs text-amber-600">{e}</p>)}
+            </div>
+          ) : reviews.length === 0 && (
+            <p className="text-xs mt-2">Make sure you have <Link href="/gbp/connect" className="text-sky-500 underline">connected locations</Link>.</p>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -229,6 +342,20 @@ export default function ReviewsPage() {
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">{review.locationDisplayName}</p>
                     {review.comment && <p className="text-sm text-slate-600 mt-2 leading-relaxed line-clamp-3">{review.comment}</p>}
+                    {review.reviewMediaItems?.length > 0 && (
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {review.reviewMediaItems.map((item, i) => (
+                          <a key={i} href={item.thumbnailUrl} target="_blank" rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={item.thumbnailUrl} alt={`Review photo ${i + 1}`}
+                              className="h-16 w-16 object-cover rounded-lg border border-slate-200 hover:opacity-80 transition-opacity"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                     {hasReply && (
                       <div className="mt-3 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
                         <p className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Your reply</p>
@@ -247,11 +374,50 @@ export default function ReviewsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-800">AI Reply Instructions</h2>
+              <h2 className="text-base font-bold text-slate-800">AI Reply Settings</h2>
               <button onClick={() => setShowSettings(false)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
             </div>
-            <p className="text-xs text-slate-500">This prompt tells Gemini how to write replies. It&apos;s saved in your browser.</p>
-            <textarea value={instructionDraft} onChange={(e) => setInstructionDraft(e.target.value)} rows={6} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none" />
+
+            {/* Model picker */}
+            <div>
+              <p className="text-xs font-semibold text-slate-700 mb-2">Gemini Model</p>
+              <div className="grid grid-cols-3 gap-2">
+                {GEMINI_MODELS.map((m) => {
+                  const used = modelUsage[m.id] ?? 0;
+                  const remaining = Math.max(0, m.rpd - used);
+                  const pct = remaining / m.rpd;
+                  const barColor = pct > 0.5 ? "bg-emerald-400" : pct > 0.2 ? "bg-amber-400" : "bg-rose-400";
+                  const remainColor = pct > 0.5 ? "text-emerald-700" : pct > 0.2 ? "text-amber-700" : "text-rose-600";
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => selectModel(m.id)}
+                      className={`flex flex-col items-start gap-1 border rounded-xl px-3 py-2.5 text-left transition-all ${geminiModel === m.id ? "border-sky-500 bg-sky-50 ring-1 ring-sky-300" : "border-slate-200 hover:border-slate-300 bg-white"}`}
+                    >
+                      <div className="flex items-center gap-1.5 w-full flex-wrap">
+                        <span className="text-xs font-semibold text-slate-800">{m.label}</span>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${m.badgeColor}`}>{m.rpd} RPD</span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 leading-tight">{m.description}</span>
+                      <div className="w-full mt-1">
+                        <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct * 100}%` }} />
+                        </div>
+                        <p className={`text-[10px] font-semibold mt-0.5 tabular-nums ${remainColor}`}>{remaining.toLocaleString()} left</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Instruction textarea */}
+            <div>
+              <p className="text-xs font-semibold text-slate-700 mb-1.5">Reply Instructions</p>
+              <p className="text-xs text-slate-500 mb-2">This prompt tells Gemini how to write replies. It&apos;s saved in your browser.</p>
+              <textarea value={instructionDraft} onChange={(e) => setInstructionDraft(e.target.value)} rows={6} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none" />
+            </div>
+
             <div className="flex justify-end gap-2">
               <button onClick={() => setInstructionDraft(DEFAULT_INSTRUCTION)} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">Reset to default</button>
               <button onClick={saveInstruction} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 text-white px-4 py-1.5 rounded-lg transition-colors">Save</button>
@@ -274,12 +440,49 @@ export default function ReviewsPage() {
               </div>
               <p className="text-[11px] text-slate-400">{reviewQueue[queueIndex].locationDisplayName}</p>
               {reviewQueue[queueIndex].comment && <p className="text-sm text-slate-600 leading-relaxed mt-1">{reviewQueue[queueIndex].comment}</p>}
+              {reviewQueue[queueIndex].reviewMediaItems?.length > 0 && (
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  {reviewQueue[queueIndex].reviewMediaItems.map((item, i) => (
+                    <a key={i} href={item.thumbnailUrl} target="_blank" rel="noopener noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={item.thumbnailUrl} alt={`Review photo ${i + 1}`}
+                        className="h-20 w-20 object-cover rounded-lg border border-slate-200 hover:opacity-80 transition-opacity"
+                      />
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">AI-Generated Reply <span className="font-normal text-slate-400">(edit before posting)</span></label>
               {generatingReply ? (
-                <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-400 bg-slate-50 min-h-[100px] flex items-center justify-center">Generating reply\u2026</div>
-              ) : (
+                <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-400 bg-slate-50 min-h-[100px] flex items-center justify-center">Generating reply…</div>
+              ) : serviceUnavailable ? (
+                <div className="w-full border border-rose-200 rounded-lg px-4 py-4 bg-rose-50 min-h-25 flex flex-col items-center justify-center gap-2 text-center">
+                  <svg className="w-5 h-5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <p className="text-xs font-semibold text-rose-800">Gemini temporarily unavailable</p>
+                  <p className="text-xs text-rose-700">High demand on the AI service. Please try again.</p>
+                  <button onClick={retryGenerate} className="mt-1 text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white px-4 py-1.5 rounded-lg transition-colors">
+                    Retry
+                  </button>
+                </div>
+              ) : rateLimitUntil && rateLimitSecsLeft > 0 ? (
+                <div className="w-full border border-amber-200 rounded-lg px-4 py-4 bg-amber-50 min-h-[100px] flex flex-col items-center justify-center gap-1.5 text-center">
+                  <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-xs font-semibold text-amber-800">Rate limit reached</p>
+                  <p className="text-xs text-amber-700">
+                    Retry in{" "}
+                    <span className="font-bold tabular-nums">
+                      {rateLimitSecsLeft >= 60
+                        ? `${Math.floor(rateLimitSecsLeft / 60)}m ${rateLimitSecsLeft % 60}s`
+                        : `${rateLimitSecsLeft}s`}
+                    </span>
+                  </p>
+                </div>              ) : (
                 <textarea value={currentReply} onChange={(e) => setCurrentReply(e.target.value)} rows={5} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none" />
               )}
             </div>
@@ -288,7 +491,7 @@ export default function ReviewsPage() {
               <button onClick={() => { setReviewModalOpen(false); setSelected(new Set()); loadReviews(); }} className="text-xs text-slate-400 hover:text-slate-600">Cancel all</button>
               <div className="flex gap-2">
                 <button onClick={skipCurrentReply} disabled={generatingReply || postingReply} className="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 px-4 py-1.5 rounded-lg transition-colors">Skip</button>
-                <button onClick={postCurrentReply} disabled={generatingReply || postingReply || !currentReply} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors">{postingReply ? "Posting\u2026" : "Post Reply"}</button>
+                <button onClick={postCurrentReply} disabled={generatingReply || postingReply || !currentReply || serviceUnavailable} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors">{postingReply ? "Posting…" : "Post Reply"}</button>
               </div>
             </div>
           </div>

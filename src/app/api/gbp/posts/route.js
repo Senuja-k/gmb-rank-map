@@ -19,6 +19,7 @@
 
 import { NextResponse } from "next/server";
 import { generateAndPublishPost, createGbpPost } from "@/lib/gbp";
+import { supabase } from "@/lib/supabase";
 
 export async function POST(request) {
   let body;
@@ -35,6 +36,7 @@ export async function POST(request) {
     summaryText,
     imageUrl = "",
     ctaUrl = "",
+    ctaActionType = "LEARN_MORE",
     topicType = "STANDARD",
     eventData = null,
     offerData = null,
@@ -48,10 +50,24 @@ export async function POST(request) {
     );
   }
 
+  // The v4 mybusiness API requires the full "accounts/{id}/locations/{id}" path.
+  // The DB stores location_name as just "locations/{id}" and account_name separately.
+  let fullLocationPath = locationName;
+  if (!locationName.startsWith("accounts/")) {
+    const { data: locRow } = await supabase
+      .from("gbp_locations")
+      .select("account_name")
+      .eq("location_name", locationName)
+      .single();
+    if (locRow?.account_name) {
+      fullLocationPath = `${locRow.account_name}/${locationName}`;
+    }
+  }
+
   try {
     // Legacy: mode=generate uses Gemini from topic text
     if (mode === "generate" && topic) {
-      const result = await generateAndPublishPost(email, locationName, topic, imageUrl);
+      const result = await generateAndPublishPost(email, fullLocationPath, topic, imageUrl);
       return NextResponse.json(result);
     }
 
@@ -64,13 +80,14 @@ export async function POST(request) {
 
     const apiResponse = await createGbpPost(
       email,
-      locationName,
+      fullLocationPath,
       summaryText,
       imageUrl,
       ctaUrl,
       topicType,
       eventData,
-      offerData
+      offerData,
+      ctaActionType
     );
     return NextResponse.json({ apiResponse });
   } catch (err) {

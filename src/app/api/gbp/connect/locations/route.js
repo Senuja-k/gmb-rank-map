@@ -35,7 +35,22 @@ export async function GET(request) {
       )
     ).flat();
 
-    return NextResponse.json({ locations });
+    // Deduplicate: same location can appear under multiple GBP account groups.
+    // Primary key: locationName (Google resource path).
+    // Secondary key: displayName+address for cases where the same physical
+    // location is listed under different account-group paths.
+    const seenNames = new Set();
+    const seenDisplay = new Set();
+    const unique = locations.filter((loc) => {
+      if (seenNames.has(loc.locationName)) return false;
+      const displayKey = `${loc.displayName}||${loc.address}`;
+      if (seenDisplay.has(displayKey)) return false;
+      seenNames.add(loc.locationName);
+      seenDisplay.add(displayKey);
+      return true;
+    });
+
+    return NextResponse.json({ locations: unique });
   } catch (err) {
     console.error("[GBP connect/locations]", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
