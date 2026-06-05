@@ -344,6 +344,7 @@ export default function GeminiLiveChat() {
       wsUrl = buildWsUrl();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[GeminiLive] Configuration error:', msg);
       setConnectError(msg);
       setWsStatus('disconnected');
       return;
@@ -360,8 +361,15 @@ export default function GeminiLiveChat() {
     const userEmail = getUserEmail();
 
     ws.onopen = () => {
-      const setupPayload = buildSetupPayload(userEmail);
-      ws.send(setupPayload);
+      console.log('[GeminiLive] WebSocket connected, sending setup...');
+      try {
+        const setupPayload = buildSetupPayload(userEmail);
+        ws.send(setupPayload);
+      } catch (err) {
+        console.error('[GeminiLive] Failed to send setup payload:', err);
+        setConnectError(`Setup failed: ${err instanceof Error ? err.message : String(err)}`);
+        ws.close();
+      }
     };
 
     ws.onmessage = (ev) => {
@@ -383,7 +391,16 @@ export default function GeminiLiveChat() {
 
       // setupComplete → session is ready; update status
       if (data.setupComplete !== undefined) {
+        console.log('[GeminiLive] Setup complete, session ready');
         setWsStatus('connected');
+        return;
+      }
+
+      // Handle errors from the server
+      if (data.error !== undefined) {
+        const errorMsg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+        console.error('[GeminiLive] Server error:', errorMsg);
+        setConnectError(`Server error: ${errorMsg}`);
         return;
       }
 
@@ -514,9 +531,10 @@ export default function GeminiLiveChat() {
     };
 
     ws.onerror = (e) => {
-      console.error('[GeminiLive] WebSocket error:', e);
+      console.error('[GeminiLive] WebSocket error event:', e);
       connectionFailedRef.current = true;
       setWsStatus('disconnected');
+      setConnectError('WebSocket connection error occurred');
       wsRef.current = null;
     };
 
@@ -525,8 +543,9 @@ export default function GeminiLiveChat() {
       if (!clean) {
         connectionFailedRef.current = true;
         const reason = e.reason || `code ${e.code}`;
-        console.error(`[GeminiLive] WebSocket closed (${reason}). Model: ${LIVE_MODEL}`);
-        setConnectError(`Connection closed: ${reason}`);
+        const fullMsg = `[GeminiLive] WebSocket closed (${reason}). Model: ${LIVE_MODEL}, API key present: ${!!process.env.NEXT_PUBLIC_GEMINI_API_KEY}`;
+        console.error(fullMsg);
+        setConnectError(`Connection closed: ${reason}. Check your API key configuration.`);
       }
       setWsStatus('disconnected');
       wsRef.current = null;

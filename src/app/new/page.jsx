@@ -97,6 +97,8 @@ export default function NewScanPage() {
   const [shapeType, setShapeType] = useState("square"); // square | circle | polygon
   const [drawnShape, setDrawnShape] = useState(null); // polygon vertices or circle info
   const [gridPoints, setGridPoints] = useState([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [polygonVertices, setPolygonVertices] = useState([]);
 
   // Scan state
   const [scanning, setScanning] = useState(false);
@@ -133,14 +135,18 @@ export default function NewScanPage() {
   // ── Load Google Maps ──────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (window.google?.maps) {
+      setMapsLoaded(true);
+      return;
+    }
     if (window.__gmapsLoading) {
       const check = () => {
-        if (window.google?.maps?.places && window.google?.maps?.drawing) setMapsLoaded(true);
+        if (window.google?.maps?.places) setMapsLoaded(true);
       };
       check();
       const interval = setInterval(() => {
         check();
-        if (window.google?.maps?.places && window.google?.maps?.drawing) clearInterval(interval);
+        if (window.google?.maps?.places) clearInterval(interval);
       }, 200);
       return () => clearInterval(interval);
     }
@@ -153,7 +159,9 @@ export default function NewScanPage() {
 
     window.__gmapsLoading = true;
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,drawing,marker`;
+    // Note: 'drawing' library was deprecated/removed from Maps JS API v3.65+
+    // Use only 'places' and 'marker' for compatibility with newer API versions
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,marker`;
     script.async = true;
     script.defer = true;
     script.onload = () => setMapsLoaded(true);
@@ -162,26 +170,35 @@ export default function NewScanPage() {
   }, []);
 
   // ── Init Autocomplete ─────────────────────────────────────────────────────
+  // Note: google.maps.places.Autocomplete is deprecated as of March 1, 2025
+  // Consider migrating to the Places API v1 (places/autocomplete endpoint) or Google Places Web component
   useEffect(() => {
     if (!mapsLoaded || !autocompleteInputRef.current) return;
     if (!window.google?.maps?.places) return;
 
-    const autocomplete = new window.google.maps.places.Autocomplete(
-      autocompleteInputRef.current,
-      { types: ["establishment"] }
-    );
+    try {
+      // Using deprecated Autocomplete — this will be removed in a future API version
+      // eslint-disable-next-line new-cap
+      const autocomplete = new window.google.maps.places.Autocomplete(
+        autocompleteInputRef.current,
+        { types: ["establishment"] }
+      );
 
-    autocomplete.addListener("place_changed", () => {
-      const p = autocomplete.getPlace();
-      if (!p.place_id || !p.geometry?.location) return;
-      const newPlace = {
-        placeId: p.place_id,
-        name: p.name ?? "",
-        lat: p.geometry.location.lat(),
-        lng: p.geometry.location.lng(),
-      };
-      setPlace(newPlace);
-    });
+      autocomplete.addListener("place_changed", () => {
+        const p = autocomplete.getPlace();
+        if (!p.place_id || !p.geometry?.location) return;
+        const newPlace = {
+          placeId: p.place_id,
+          name: p.name ?? "",
+          lat: p.geometry.location.lat(),
+          lng: p.geometry.location.lng(),
+        };
+        setPlace(newPlace);
+      });
+    } catch (err) {
+      console.error("[Maps] Autocomplete initialization failed:", err);
+      // Autocomplete might not be available in this API version
+    }
   }, [mapsLoaded]);
 
   // ── Init Map ──────────────────────────────────────────────────────────────
@@ -252,128 +269,123 @@ export default function NewScanPage() {
     }
   }, [place]);
 
-  // ── Setup drawing manager based on shapeType ─────────────────────────────
+  // ── Setup shape drawing handlers ────────────────────────────────────────
+  // Note: DrawingManager was removed from Maps JS API v3.65+
+  // Using native google.maps.Polygon/Rectangle/Circle with event listeners
   useEffect(() => {
     if (!mapsLoaded || !mapRef.current) return;
-    if (!window.google?.maps?.drawing) return;
 
-    // Remove existing drawing manager
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setMap(null);
-      drawingManagerRef.current = null;
-    }
+    const handleMapClick = (e) => {
+      if (!isDrawing) return;
+      const lat = e.latLng.lat();
+      const lng = e.latLng.lng();
 
-    let drawingMode = null;
-    if (shapeType === "square") drawingMode = window.google.maps.drawing.OverlayType.RECTANGLE;
-    else if (shapeType === "circle") drawingMode = window.google.maps.drawing.OverlayType.CIRCLE;
-    else if (shapeType === "polygon") drawingMode = window.google.maps.drawing.OverlayType.POLYGON;
-
-    const dm = new window.google.maps.drawing.DrawingManager({
-      drawingMode,
-      drawingControl: false,
-      rectangleOptions: {
-        fillColor: "#0ea5e9",
-        fillOpacity: 0.15,
-        strokeColor: "#0ea5e9",
-        strokeWeight: 2,
-        editable: true,
-        draggable: true,
-      },
-      circleOptions: {
-        fillColor: "#0ea5e9",
-        fillOpacity: 0.15,
-        strokeColor: "#0ea5e9",
-        strokeWeight: 2,
-        editable: true,
-        draggable: true,
-      },
-      polygonOptions: {
-        fillColor: "#0ea5e9",
-        fillOpacity: 0.15,
-        strokeColor: "#0ea5e9",
-        strokeWeight: 2,
-        editable: true,
-        draggable: true,
-      },
-    });
-
-    dm.setMap(mapRef.current);
-    drawingManagerRef.current = dm;
-
-    const extractShape = (overlay, type) => {
-      // Remove previous overlay
-      if (currentOverlayRef.current) {
-        currentOverlayRef.current.setMap(null);
-      }
-      currentOverlayRef.current = overlay;
-      dm.setDrawingMode(null);
-
-      const update = () => {
-        if (type === "rectangle") {
-          const bounds = overlay.getBounds();
-          const ne = bounds.getNorthEast();
-          const sw = bounds.getSouthWest();
-          setDrawnShape({
-            type: "square",
-            vertices: [
-              { lat: ne.lat(), lng: ne.lng() },
-              { lat: ne.lat(), lng: sw.lng() },
-              { lat: sw.lat(), lng: sw.lng() },
-              { lat: sw.lat(), lng: ne.lng() },
-            ],
-            center: {
-              lat: (ne.lat() + sw.lat()) / 2,
-              lng: (ne.lng() + sw.lng()) / 2,
-            },
+      if (shapeType === "polygon") {
+        // Add vertex to polygon
+        const newVertices = [...polygonVertices, { lat, lng }];
+        setPolygonVertices(newVertices);
+        
+        // Update or create polygon overlay
+        if (currentOverlayRef.current) {
+          currentOverlayRef.current.setPath(newVertices);
+        } else {
+          const poly = new window.google.maps.Polygon({
+            map: mapRef.current,
+            path: newVertices,
+            strokeColor: "#0ea5e9",
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: "#0ea5e9",
+            fillOpacity: 0.15,
+            editable: true,
+            draggable: true,
           });
-        } else if (type === "circle") {
-          const c = overlay.getCenter();
-          const r = overlay.getRadius();
-          setDrawnShape({
-            type: "circle",
-            center: { lat: c.lat(), lng: c.lng() },
-            radiusKm: r / 1000,
-          });
-        } else if (type === "polygon") {
-          const path = overlay.getPath();
-          const verts = [];
-          path.forEach((p) => verts.push({ lat: p.lat(), lng: p.lng() }));
-          setDrawnShape({
-            type: "polygon",
-            vertices: verts,
-            center: {
-              lat: verts.reduce((s, v) => s + v.lat, 0) / verts.length,
-              lng: verts.reduce((s, v) => s + v.lng, 0) / verts.length,
-            },
-          });
+          currentOverlayRef.current = poly;
+          
+          // Listen for path edits
+          const pathListener = poly.getPath().addListener('set_at', () => updateShapeFromOverlay("polygon"));
+          const insertListener = poly.getPath().addListener('insert_at', () => updateShapeFromOverlay("polygon"));
+          const removeListener = poly.getPath().addListener('remove_at', () => updateShapeFromOverlay("polygon"));
+          poly.__listeners = [pathListener, insertListener, removeListener];
         }
-      };
-
-      update();
-
-      // Listen for shape edits
-      if (type === "rectangle") {
-        overlay.addListener("bounds_changed", update);
-      } else if (type === "circle") {
-        overlay.addListener("radius_changed", update);
-        overlay.addListener("center_changed", update);
-      } else if (type === "polygon") {
-        const path = overlay.getPath();
-        window.google.maps.event.addListener(path, "set_at", update);
-        window.google.maps.event.addListener(path, "insert_at", update);
-        window.google.maps.event.addListener(path, "remove_at", update);
+      } else if (shapeType === "circle" && !drawnShape) {
+        // First click = center
+        setDrawnShape({ type: "circle", center: { lat, lng }, radiusKm: 0 });
+        
+        const circle = new window.google.maps.Circle({
+          map: mapRef.current,
+          center: { lat, lng },
+          radius: 1000, // 1 km default
+          strokeColor: "#0ea5e9",
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          fillColor: "#0ea5e9",
+          fillOpacity: 0.15,
+          editable: true,
+          draggable: true,
+        });
+        currentOverlayRef.current = circle;
+        
+        // Listen for radius/center changes
+        const radiusListener = circle.addListener('radius_changed', () => updateShapeFromOverlay("circle"));
+        const centerListener = circle.addListener('center_changed', () => updateShapeFromOverlay("circle"));
+        circle.__listeners = [radiusListener, centerListener];
+        
+        setIsDrawing(false);
+      } else if (shapeType === "square" && !drawnShape) {
+        // First click = first corner, wait for second click
+        if (!drawnShape || !drawnShape.firstCorner) {
+          setDrawnShape({ type: "square", firstCorner: { lat, lng } });
+        }
       }
-      overlay.addListener("dragend", update);
     };
 
-    window.google.maps.event.addListener(dm, "rectanglecomplete", (r) => extractShape(r, "rectangle"));
-    window.google.maps.event.addListener(dm, "circlecomplete", (c) => extractShape(c, "circle"));
-    window.google.maps.event.addListener(dm, "polygoncomplete", (p) => extractShape(p, "polygon"));
+    const handleMapRightClick = (e) => {
+      if (shapeType === "polygon" && isDrawing && polygonVertices.length >= 3) {
+        // Right-click to finish polygon
+        finishPolygon();
+      }
+    };
+
+    const handleMouseMove = (e) => {
+      if (shapeType === "square" && drawnShape?.firstCorner && isDrawing) {
+        // Draw preview rectangle while dragging
+        const corner1 = drawnShape.firstCorner;
+        const corner2 = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+        
+        if (currentOverlayRef.current && currentOverlayRef.current instanceof window.google.maps.Rectangle) {
+          currentOverlayRef.current.setBounds(
+            new window.google.maps.LatLngBounds(corner1, corner2)
+          );
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (shapeType === "square" && drawnShape?.firstCorner && isDrawing) {
+        // Finish rectangle on mouse up
+        finishRectangle();
+      }
+    };
+
+    const handleMouseDown = (e) => {
+      if (shapeType === "square" && drawnShape?.firstCorner) {
+        setIsDrawing(true);
+      }
+    };
+
+    const listeners = [];
+    listeners.push(mapRef.current.addListener('click', handleMapClick));
+    listeners.push(mapRef.current.addListener('rightclick', handleMapRightClick));
+    listeners.push(mapRef.current.addListener('mousemove', handleMouseMove));
+    listeners.push(mapRef.current.addListener('mousedown', handleMouseDown));
+    window.addEventListener('mouseup', handleMouseUp);
 
     return () => {
-      dm.setMap(null);
+      listeners.forEach((listener) => listener.remove());
+      window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [mapsLoaded, shapeType]);
+  }, [mapsLoaded, isDrawing, shapeType, drawnShape, polygonVertices]);
 
   // ── Generate grid preview when shape or grid config changes ───────────────
   useEffect(() => {
@@ -430,22 +442,78 @@ export default function NewScanPage() {
     setKeywords(copy);
   };
 
-  // ── Clear drawn shape ────────────────────────────────────────────────────
+  // ── Shape drawing helper functions ────────────────────────────────────
+  const updateShapeFromOverlay = (type) => {
+    if (!currentOverlayRef.current) return;
+    
+    if (type === "polygon" && currentOverlayRef.current instanceof window.google.maps.Polygon) {
+      const path = currentOverlayRef.current.getPath().getArray().map((latLng) => ({
+        lat: latLng.lat(),
+        lng: latLng.lng(),
+      }));
+      if (path.length >= 3) {
+        const lats = path.map((p) => p.lat);
+        const lngs = path.map((p) => p.lng);
+        const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+        setDrawnShape({ type: "polygon", vertices: path, center });
+      }
+    } else if (type === "circle" && currentOverlayRef.current instanceof window.google.maps.Circle) {
+      const center = currentOverlayRef.current.getCenter();
+      const radiusMeters = currentOverlayRef.current.getRadius();
+      const radiusKm = radiusMeters / 1000;
+      setDrawnShape({ type: "circle", center: { lat: center.lat(), lng: center.lng() }, radiusKm });
+    } else if (type === "square" && currentOverlayRef.current instanceof window.google.maps.Rectangle) {
+      const bounds = currentOverlayRef.current.getBounds();
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const vertices = [
+        { lat: sw.lat(), lng: sw.lng() },
+        { lat: ne.lat(), lng: sw.lng() },
+        { lat: ne.lat(), lng: ne.lng() },
+        { lat: sw.lat(), lng: ne.lng() },
+      ];
+      const center = { lat: (sw.lat() + ne.lat()) / 2, lng: (sw.lng() + ne.lng()) / 2 };
+      setDrawnShape({ type: "square", vertices, center });
+    }
+  };
+
+  const finishPolygon = () => {
+    if (polygonVertices.length < 3) {
+      setError("Polygon must have at least 3 vertices.");
+      return;
+    }
+    updateShapeFromOverlay("polygon");
+    setIsDrawing(false);
+    setPolygonVertices([]);
+  };
+
+  const finishRectangle = () => {
+    if (drawnShape?.firstCorner) {
+      updateShapeFromOverlay("square");
+      setIsDrawing(false);
+      setDrawnShape(null);
+    }
+  };
+
+  // ── Clear drawn shape ────────────────────────────────────────────────
   const clearShape = () => {
     if (currentOverlayRef.current) {
+      if (currentOverlayRef.current.__listeners) {
+        currentOverlayRef.current.__listeners.forEach((listener) => {
+          try {
+            listener.remove();
+          } catch (e) {
+            console.warn('Failed to remove listener:', e);
+          }
+        });
+      }
       currentOverlayRef.current.setMap(null);
       currentOverlayRef.current = null;
     }
     setDrawnShape(null);
+    setPolygonVertices([]);
+    setIsDrawing(false);
     setGridPoints([]);
-    // Re-enable drawing mode
-    if (drawingManagerRef.current) {
-      let mode = null;
-      if (shapeType === "square") mode = window.google.maps.drawing.OverlayType.RECTANGLE;
-      else if (shapeType === "circle") mode = window.google.maps.drawing.OverlayType.CIRCLE;
-      else if (shapeType === "polygon") mode = window.google.maps.drawing.OverlayType.POLYGON;
-      drawingManagerRef.current.setDrawingMode(mode);
-    }
   };
 
   // ── Run Scan (one per keyword) ────────────────────────────────────────────
@@ -552,6 +620,7 @@ export default function NewScanPage() {
                   onClick={() => {
                     clearShape();
                     setShapeType(type);
+                    setIsDrawing(true);
                   }}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     shapeType === type
@@ -562,6 +631,14 @@ export default function NewScanPage() {
                   {type.charAt(0).toUpperCase() + type.slice(1)}
                 </button>
               ))}
+              {isDrawing && shapeType === "polygon" && polygonVertices.length >= 3 && (
+                <button
+                  onClick={finishPolygon}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 ml-auto"
+                >
+                  Finish Polygon (Right-click)
+                </button>
+              )}
               {drawnShape && (
                 <button
                   onClick={clearShape}

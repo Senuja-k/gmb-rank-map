@@ -104,6 +104,8 @@ async function rankAtPoint(point, keyword, targetPlaceId, apiKey) {
     placeId: (p.id ?? "").replace("places/", ""),
     name: p.displayName?.text ?? "Unknown",
     rank: idx + 1,
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
   }));
 
   const idx = places.findIndex((p) => {

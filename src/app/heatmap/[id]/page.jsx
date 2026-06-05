@@ -138,9 +138,61 @@ export default function HeatmapDetailPage({ params }) {
       }
     });
 
+    // Add competitor markers
+    if (scan.competitors && Array.isArray(scan.competitors)) {
+      scan.competitors.forEach((comp, idx) => {
+        // Only show competitors that have location data
+        if (comp.lat && comp.lng) {
+          const compMarkerEl = document.createElement("div");
+          compMarkerEl.style.cssText = `
+            width: 32px; height: 32px; border-radius: 50%;
+            background: #e91e63; border: 3px solid #fff;
+            box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 12px; font-weight: bold; color: #fff;
+          `;
+          compMarkerEl.textContent = idx + 1;
+          compMarkerEl.title = comp.name;
+
+          try {
+            const marker = new window.google.maps.marker.AdvancedMarkerElement({
+              map: mapRef.current,
+              position: { lat: comp.lat, lng: comp.lng },
+              content: compMarkerEl,
+              title: comp.name,
+              zIndex: 100,
+            });
+            markersRef.current.push(marker);
+          } catch {
+            // Fallback to standard marker
+            const marker = new window.google.maps.Marker({
+              map: mapRef.current,
+              position: { lat: comp.lat, lng: comp.lng },
+              title: comp.name,
+              icon: {
+                path: window.google.maps.SymbolPath.CIRCLE,
+                scale: 8,
+                fillColor: "#e91e63",
+                fillOpacity: 1,
+                strokeColor: "#fff",
+                strokeWeight: 3,
+              },
+              zIndex: 100,
+            });
+            markersRef.current.push(marker);
+          }
+        }
+      });
+    }
+
     // Fit bounds
     const bounds = new window.google.maps.LatLngBounds();
     scan.gridPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+    if (scan.competitors && Array.isArray(scan.competitors)) {
+      scan.competitors.forEach((c) => {
+        if (c.lat && c.lng) bounds.extend({ lat: c.lat, lng: c.lng });
+      });
+    }
     mapRef.current.fitBounds(bounds, 40);
   }, [mapsLoaded, scan, hideColors]);
 

@@ -13,7 +13,13 @@ export function buildCompetitorSummaries(gridPoints, targetPlaceId) {
     for (const comp of point.competitors) {
       if (comp.placeId === targetPlaceId) continue;
       if (!map.has(comp.placeId)) {
-        map.set(comp.placeId, { name: comp.name, ranks: [], top3: 0 });
+        map.set(comp.placeId, { 
+          name: comp.name, 
+          ranks: [], 
+          top3: 0,
+          lat: comp.lat,
+          lng: comp.lng,
+        });
       }
       const entry = map.get(comp.placeId);
       entry.ranks.push(comp.rank);
@@ -35,6 +41,8 @@ export function buildCompetitorSummaries(gridPoints, targetPlaceId) {
       bestRank,
       top3Pct: parseFloat(((data.top3 / totalPoints) * 100).toFixed(2)),
       appearances: data.ranks.length,
+      lat: data.lat,
+      lng: data.lng,
     });
   }
 
