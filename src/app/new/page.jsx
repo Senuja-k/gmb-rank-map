@@ -754,6 +754,10 @@ export default function NewScanPage() {
                   <option value={1}>1 km</option>
                   <option value={1.5}>1.5 km</option>
                   <option value={2}>2 km</option>
+                  <option value={2.5}>2.5 km</option>
+                  <option value={3}>3 km</option>
+                  <option value={3.5}>3.5 km</option>
+                  <option value={4}>4 km</option>
                 </select>
               </div>
             </div>
