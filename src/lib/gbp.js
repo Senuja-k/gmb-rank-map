@@ -88,10 +88,14 @@ async function fetchImagePart(url) {
 /**
  * Generate an AI reply using Gemini without posting it.
  * @param {string[]} reviewPhotoUrls  Optional array of photo URLs from the review.
+ * @param {number} starRating  Optional star rating (1-5) from the review.
  */
-export async function generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction, reviewPhotoUrls = [], geminiModel) {
+export async function generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction, reviewPhotoUrls = [], geminiModel, starRating) {
   const model = getGeminiModel(geminiModel);
   const instruction = customInstruction || DEFAULT_REVIEW_INSTRUCTION;
+  const ratingContext = starRating
+    ? `${starRating === 5 ? "🌟 This was a 5-star review" : starRating >= 3 ? `This was a ${starRating}-star review` : `This was a ${starRating}-star review with concerns`}. `
+    : "";
   const reviewContent = reviewText
     ? `who left this review: "${reviewText}"`
     : `who left a star rating without a written comment`;
@@ -101,7 +105,7 @@ export async function generateReplyOnly(email, locationName, reviewerName, revie
   const prompt =
     `${instruction}\n\n` +
     `Write a professional, warm reply to a customer named ${reviewerName} ` +
-    `${reviewContent}.${photoContext} Mention our showroom and invite them back.`;
+    `${reviewContent}.${photoContext} ${ratingContext}Mention our showroom and invite them back.`;
 
   if (reviewPhotoUrls.length) {
     const imageParts = (await Promise.all(reviewPhotoUrls.map(fetchImagePart))).filter(Boolean);
@@ -135,9 +139,10 @@ export async function handleReviewReply(
   reviewText,
   customInstruction,
   reviewPhotoUrls = [],
-  geminiModel
+  geminiModel,
+  starRating
 ) {
-  const aiReply = await generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction, reviewPhotoUrls, geminiModel);
+  const aiReply = await generateReplyOnly(email, locationName, reviewerName, reviewText, customInstruction, reviewPhotoUrls, geminiModel, starRating);
   // reviewId may be a full resource name or just the ID suffix
   const reviewName = reviewId.startsWith("accounts/")
     ? reviewId

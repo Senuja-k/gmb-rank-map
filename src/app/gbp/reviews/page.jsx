@@ -166,6 +166,7 @@ export default function ReviewsPage() {
             customInstruction: instruction,
             reviewPhotos: review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [],
             geminiModel,
+            starRating: review.starRating,
           }),
         });
         if (!res.ok) { const d = await res.json(); setAutoErrors((p) => [...p, `${review.reviewer?.displayName ?? "Review"}: ${d.error}`]); }
@@ -190,7 +191,7 @@ export default function ReviewsPage() {
       const photoUrls = review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [];
       const res = await fetch("/api/gbp/reviews/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: review.email, locationName: review.locationName, reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "", customInstruction: instruction, reviewPhotos: photoUrls, geminiModel }),
+        body: JSON.stringify({ email: review.email, locationName: review.locationName, reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "", customInstruction: instruction, reviewPhotos: photoUrls, geminiModel, starRating: review.starRating }),
       });
       const data = await res.json();
       if (res.status === 429) {

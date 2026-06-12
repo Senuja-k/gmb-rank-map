@@ -25,9 +25,10 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { email, locationName, reviewId, reviewerName, reviewText, customInstruction, reviewPhotos, geminiModel } = body;
+  const { email, locationName, reviewId, reviewerName, reviewText, customInstruction, reviewPhotos, geminiModel, starRating } = body;
 
-  if (!email || !locationName || !reviewId || !reviewerName || !reviewText) {
+  if (!email || !locationName || !reviewId || !reviewerName || !reviewText || starRating === undefined || starRating === null) {
+    // Added starRating to the validation check
     return NextResponse.json(
       {
         error:
@@ -46,7 +47,8 @@ export async function POST(request) {
       reviewText,
       customInstruction,
       Array.isArray(reviewPhotos) ? reviewPhotos : [],
-      geminiModel
+      geminiModel,
+      starRating // Added starRating to the function call
     );
     return NextResponse.json(result);
   } catch (err) {
