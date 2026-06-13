@@ -5,10 +5,11 @@
  */
 import { NextResponse } from "next/server";
 import { fetchReviewsForLocation } from "@/lib/gbp";
-import { supabase } from "@/lib/supabase";
+import { createAdminClient } from "@/lib/supabase-server";
 
 export async function GET() {
   try {
+    const supabase = createAdminClient();
     const { data: locations, error } = await supabase
       .from("gbp_locations")
       .select("location_name, account_name, display_name, google_email")

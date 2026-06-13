@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { createAdminClient } from "./supabase-server";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const FREE_TEXT_SEARCH_PRO = 5000;
@@ -15,6 +15,7 @@ function currentMonth() {
 
 /** Load (or create) the current month's budget row for a specific API key. */
 async function loadBudget(apiKeyIndex = 0) {
+  const supabase = createAdminClient();
   const month = currentMonth();
   const { data, error } = await supabase
     .from("budget")
@@ -82,6 +83,7 @@ export async function canAffordScan(pointCount, usesTextSearch, apiKeyIndex = 0)
 }
 
 export async function recordSpend(callsMade, usesTextSearch, apiKeyIndex = 0) {
+  const supabase = createAdminClient();
   const data = await loadBudget(apiKeyIndex);
   const col = usesTextSearch ? "text_search_calls" : "nearby_search_calls";
   const newVal = (usesTextSearch ? data.text_search_calls : data.nearby_search_calls) + callsMade;

@@ -9,9 +9,10 @@
  * }
  */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createAdminClient } from "@/lib/supabase-server";
 
 export async function GET() {
+  const supabase = createAdminClient();
   const [settingsRes, locsRes] = await Promise.all([
     supabase.from("app_settings").select("value").eq("key", "common_cta_url").single(),
     supabase.from("gbp_locations").select("location_name, display_name, cta_url").order("display_name"),
@@ -25,6 +26,7 @@ export async function GET() {
 }
 
 export async function PATCH(request) {
+  const supabase = createAdminClient();
   let body;
   try {
     body = await request.json();

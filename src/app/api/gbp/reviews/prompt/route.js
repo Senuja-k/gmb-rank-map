@@ -7,9 +7,10 @@
  * Saves the instruction to app_settings.
  */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createAdminClient } from "@/lib/supabase-server";
 
 export async function GET() {
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("app_settings")
     .select("value")
@@ -25,6 +26,7 @@ export async function GET() {
 }
 
 export async function PATCH(request) {
+  const supabase = createAdminClient();
   let body;
   try {
     body = await request.json();

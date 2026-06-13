@@ -3,9 +3,10 @@
  * Returns all enabled locations from Supabase (used by LocationPicker).
  */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createAdminClient } from "@/lib/supabase-server";
 
 export async function GET() {
+  const supabase = createAdminClient();
   // Try with cta_url first; fall back without it if the column doesn't exist yet
   let { data, error } = await supabase
     .from("gbp_locations")

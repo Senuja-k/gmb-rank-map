@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 const navItems = [
   {
@@ -84,12 +85,45 @@ export default function Sidebar() {
   const [budgets, setBudgets] = useState(null); // array of 4 budget objects
   const [budgetError, setBudgetError] = useState(false);
   const [activeKeyIndex, setActiveKeyIndex] = useState(0);
+  const [profile, setProfile] = useState(null);
+
+  const hiddenRoutes = ["/login"];
+  const isHidden = hiddenRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"));
+
+  const visibleNavItems = profile && ["admin", "super_admin"].includes(profile.role)
+    ? [
+        ...navItems,
+        {
+          section: "Admin",
+          children: [
+            {
+              label: "Users",
+              href: "/admin/users",
+              icon: (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m4-3a4 4 0 100-8 4 4 0 000 8zm6 0a3 3 0 100-6 3 3 0 000 6z" />
+                </svg>
+              ),
+            },
+          ],
+        },
+      ]
+    : navItems;
 
   useEffect(() => {
     setActiveKeyIndex(getStoredKeyIndex());
   }, []);
 
   useEffect(() => {
+    if (isHidden) return;
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setProfile(data?.profile ?? null))
+      .catch(() => setProfile(null));
+  }, [isHidden]);
+
+  useEffect(() => {
+    if (isHidden) return;
     fetch("/api/budget")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -104,7 +138,7 @@ export default function Sidebar() {
         }
       })
       .catch(() => setBudgetError(true));
-  }, [pathname]);
+  }, [pathname, isHidden]);
 
   function switchKey(idx) {
     setActiveKeyIndex(idx);
@@ -112,6 +146,14 @@ export default function Sidebar() {
     // Notify other tabs/components
     window.dispatchEvent(new StorageEvent("storage", { key: "activeApiKeyIndex", newValue: String(idx) }));
   }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  if (isHidden) return null;
 
   return (
     <aside
@@ -142,7 +184,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 space-y-4 pb-4">
-        {navItems.map((group) => (
+        {visibleNavItems.map((group) => (
           <div key={group.section}>
             <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600 px-3 mb-1.5">
               {group.section}
@@ -274,6 +316,17 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-4 pb-4">
+        {profile && (
+          <div className="mb-3 rounded-lg bg-white/5 px-3 py-2">
+            <p className="text-[10px] text-slate-400 truncate">{profile.email}</p>
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-[9px] uppercase tracking-wide text-slate-600">{profile.role}</span>
+              <button onClick={logout} className="text-[10px] font-semibold text-slate-400 hover:text-sky-300">
+                Sign out
+              </button>
+            </div>
+          </div>
+        )}
         <p className="text-[9px] text-slate-700 text-center">
           Powered by Google APIs &amp; Gemini
         </p>

@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { createAdminClient } from "./supabase-server";
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -52,6 +52,7 @@ export function buildCompetitorSummaries(gridPoints, targetPlaceId) {
 
 /** Insert a scan row into Supabase. */
 export async function saveScan(scan) {
+  const supabase = createAdminClient();
   const { error } = await supabase.from("scans").insert({
     id: scan.id,
     business_name: scan.businessName,
@@ -72,6 +73,7 @@ export async function saveScan(scan) {
 
 /** List all scans (summary only, no heavy grid data). */
 export async function listScans() {
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("scans")
     .select("id, business_name, place_id, keyword, grid_size, spacing_km, created_at, avg_rank, top3_pct, total_points")
@@ -82,6 +84,7 @@ export async function listScans() {
 
 /** Get a single scan by ID (full data including grid points). */
 export async function getScan(id) {
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("scans")
     .select("*")
@@ -93,6 +96,7 @@ export async function getScan(id) {
 
 /** Delete a scan by ID. Returns true if deleted. */
 export async function deleteScan(id) {
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("scans")
     .delete()

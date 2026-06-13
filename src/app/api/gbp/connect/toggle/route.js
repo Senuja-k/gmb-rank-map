@@ -5,9 +5,10 @@
  * Body: { locationName: string, isEnabled: boolean }
  */
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createAdminClient } from "@/lib/supabase-server";
 
 export async function PATCH(request) {
+  const supabase = createAdminClient();
   let body;
   try {
     body = await request.json();

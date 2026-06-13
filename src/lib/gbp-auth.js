@@ -6,7 +6,7 @@
  */
 
 import { google } from "googleapis";
-import { supabase } from "./supabase";
+import { createAdminClient } from "./supabase-server";
 
 function buildOAuth2Client() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -41,6 +41,7 @@ export function getAuthUrl() {
  * Returns the google email of the connected account.
  */
 export async function exchangeCodeAndSave(code) {
+  const supabase = createAdminClient();
   const oauth2Client = buildOAuth2Client();
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
@@ -68,6 +69,7 @@ export async function exchangeCodeAndSave(code) {
  * Auto-refreshes and persists a new access-token when close to expiry.
  */
 export async function getAuthClientByEmail(email) {
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("gbp_tokens")
     .select("access_token, refresh_token, expiry_date")
@@ -107,6 +109,7 @@ export async function getAuthClientByEmail(email) {
 
 /** List all Google accounts that have been OAuth-connected. */
 export async function listConnectedAccounts() {
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("gbp_tokens")
     .select("account_id, updated_at")
@@ -118,6 +121,7 @@ export async function listConnectedAccounts() {
 
 /** Disconnect a Google account by deleting its tokens and all associated locations. */
 export async function disconnectAccount(email) {
+  const supabase = createAdminClient();
   const { error: tokensError } = await supabase
     .from("gbp_tokens")
     .delete()
