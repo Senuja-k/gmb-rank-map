@@ -5,6 +5,17 @@ import { useRouter } from "next/navigation";
 
 const roles = ["user", "admin", "super_admin"];
 
+async function readJsonOrError(response) {
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: `Unexpected ${response.status} response from the server.` };
+  }
+}
+
 export default function AdminUsersPage() {
   const router = useRouter();
   const [me, setMe] = useState(null);
@@ -30,8 +41,8 @@ export default function AdminUsersPage() {
       router.push("/");
       return;
     }
-    const meData = await meRes.json();
-    const usersData = await usersRes.json();
+    const meData = await readJsonOrError(meRes);
+    const usersData = await readJsonOrError(usersRes);
     setMe(meData.profile);
     setUsers(usersData.users ?? []);
     setLoading(false);
@@ -49,7 +60,7 @@ export default function AdminUsersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, role }),
     });
-    const data = await res.json();
+    const data = await readJsonOrError(res);
     if (!res.ok) {
       setError(data.error ?? "Could not create user.");
       return;
@@ -67,7 +78,7 @@ export default function AdminUsersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(changes),
     });
-    const data = await res.json();
+    const data = await readJsonOrError(res);
     if (!res.ok) {
       setError(data.error ?? "Could not update user.");
       return;
