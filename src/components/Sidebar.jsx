@@ -42,6 +42,15 @@ const navItems = [
         ),
       },
       {
+        label: "Review Counter",
+        href: "/gbp/review-counter",
+        icon: (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m-6 4h6m-6 4h4m-8 5h14a2 2 0 002-2V6a2 2 0 00-2-2h-3.5L14 2h-4L8.5 4H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        ),
+      },
+      {
         label: "Posts",
         href: "/gbp/posts",
         icon: (

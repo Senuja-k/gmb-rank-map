@@ -38,9 +38,14 @@ const DEFAULT_INSTRUCTION =
   "Keep replies warm, concise (3-4 sentences), and end with an invitation to visit again.";
 
 const STAR_MAP = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+const STAR_OPTIONS = [5, 4, 3, 2, 1];
+
+function starCount(rating) {
+  return STAR_MAP[rating] ?? 0;
+}
 
 function Stars({ rating }) {
-  const count = STAR_MAP[rating] ?? 0;
+  const count = starCount(rating);
   return (
     <span className="flex gap-0.5">
       {[1, 2, 3, 4, 5].map((i) => (
@@ -63,6 +68,7 @@ export default function ReviewsPage() {
   const [error, setError] = useState("");
   const [fetchErrors, setFetchErrors] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [starFilter, setStarFilter] = useState(new Set());
   const [selected, setSelected] = useState(new Set());
   const [instruction, setInstruction] = useState(DEFAULT_INSTRUCTION);
   const [showSettings, setShowSettings] = useState(false);
@@ -128,12 +134,28 @@ export default function ReviewsPage() {
 
   const locations = [...new Map(reviews.map((r) => [r.locationName, r.locationDisplayName])).entries()]
     .map(([locationName, displayName]) => ({ locationName, displayName }));
-  const filteredReviews = filter === "all" ? reviews : reviews.filter((r) => r.locationName === filter);
+  const locationFilteredReviews = filter === "all" ? reviews : reviews.filter((r) => r.locationName === filter);
+  const locationFilteredUnanswered = locationFilteredReviews.filter((r) => !r.reviewReply);
+  const starCounts = STAR_OPTIONS.reduce((acc, star) => {
+    acc[star] = locationFilteredUnanswered.filter((r) => starCount(r.starRating) === star).length;
+    return acc;
+  }, {});
+  const filteredReviews = starFilter.size === 0
+    ? locationFilteredReviews
+    : locationFilteredUnanswered.filter((r) => starFilter.has(starCount(r.starRating)));
   const unansweredFiltered = filteredReviews.filter((r) => !r.reviewReply);
   const selectedReviews = filteredReviews.filter((r) => selected.has(r.name));
 
   function toggleSelect(name) {
     setSelected((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+  }
+  function toggleStarFilter(star) {
+    setStarFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(star)) next.delete(star);
+      else next.add(star);
+      return next;
+    });
   }
   function selectAllUnanswered() { setSelected(new Set(unansweredFiltered.map((r) => r.name))); }
   function clearSelection() { setSelected(new Set()); }
@@ -289,11 +311,38 @@ export default function ReviewsPage() {
       </div>
 
       {locations.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setFilter("all")} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${filter === "all" ? "bg-sky-500 text-white border-sky-500" : "bg-white text-slate-600 border-slate-200 hover:border-sky-300"}`}>All Locations</button>
-          {locations.map((loc) => (
-            <button key={loc.locationName} onClick={() => setFilter(loc.locationName)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${filter === loc.locationName ? "bg-sky-500 text-white border-sky-500" : "bg-white text-slate-600 border-slate-200 hover:border-sky-300"}`}>{loc.displayName}</button>
-          ))}
+        <div className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setFilter("all")} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${filter === "all" ? "bg-sky-500 text-white border-sky-500" : "bg-white text-slate-600 border-slate-200 hover:border-sky-300"}`}>All Locations</button>
+            {locations.map((loc) => (
+              <button key={loc.locationName} onClick={() => setFilter(loc.locationName)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${filter === loc.locationName ? "bg-sky-500 text-white border-sky-500" : "bg-white text-slate-600 border-slate-200 hover:border-sky-300"}`}>{loc.displayName}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-slate-500 mr-1">Rating</span>
+            {STAR_OPTIONS.map((star) => {
+              const active = starFilter.has(star);
+              return (
+                <button
+                  key={star}
+                  onClick={() => toggleStarFilter(star)}
+                  className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border transition-colors ${active ? "bg-amber-400 text-white border-amber-400" : "bg-white text-slate-600 border-slate-200 hover:border-amber-300"}`}
+                  aria-pressed={active}
+                >
+                  <span className="font-semibold">{star}</span>
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
+                  <span className={active ? "text-amber-50" : "text-slate-400"}>{starCounts[star]}</span>
+                </button>
+              );
+            })}
+            {starFilter.size > 0 && (
+              <button onClick={() => setStarFilter(new Set())} className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1">
+                Clear rating
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -301,13 +350,13 @@ export default function ReviewsPage() {
         <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3">
           <div className="flex items-center gap-3">
             <button onClick={selectAllUnanswered} className="text-xs font-medium text-sky-600 hover:text-sky-800 underline">Select unanswered ({unansweredFiltered.length})</button>
-            {selected.size > 0 && (<><span className="text-xs text-slate-400">|</span><span className="text-xs text-slate-600 font-medium">{selected.size} selected</span><button onClick={clearSelection} className="text-xs text-slate-400 hover:text-slate-600">Clear</button></>)}
+            {selectedReviews.length > 0 && (<><span className="text-xs text-slate-400">|</span><span className="text-xs text-slate-600 font-medium">{selectedReviews.length} selected</span><button onClick={clearSelection} className="text-xs text-slate-400 hover:text-slate-600">Clear</button></>)}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handleAutoRespond} disabled={selected.size === 0 || autoResponding} className="text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-200 text-white px-4 py-1.5 rounded-lg transition-colors">
+            <button onClick={handleAutoRespond} disabled={selectedReviews.length === 0 || autoResponding} className="text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-200 text-white px-4 py-1.5 rounded-lg transition-colors">
               {autoResponding ? `Auto Responding\u2026 (${autoProgress.done}/${autoProgress.total})` : "Auto Respond"}
             </button>
-            <button onClick={handleReviewAndRespond} disabled={selected.size === 0 || autoResponding} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors">Review &amp; Respond</button>
+            <button onClick={handleReviewAndRespond} disabled={selectedReviews.length === 0 || autoResponding} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors">Review &amp; Respond</button>
           </div>
         </div>
       )}
