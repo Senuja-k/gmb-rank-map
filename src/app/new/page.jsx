@@ -279,6 +279,23 @@ export default function NewScanPage() {
   useEffect(() => {
     if (!mapsLoaded || !mapRef.current) return;
 
+    const attachPolygonLiveListeners = (poly) => {
+      if (poly.__listeners) {
+        poly.__listeners.forEach((listener) => listener.remove());
+      }
+
+      const refresh = () => updateShapeFromOverlay("polygon");
+      const path = poly.getPath();
+      poly.__listeners = [
+        path.addListener('set_at', refresh),
+        path.addListener('insert_at', refresh),
+        path.addListener('remove_at', refresh),
+        poly.addListener('drag', refresh),
+        poly.addListener('dragend', refresh),
+        poly.addListener('mouseup', refresh),
+      ];
+    };
+
     const handleMapClick = (e) => {
       if (!isDrawing) return;
       const lat = e.latLng.lat();
@@ -292,6 +309,7 @@ export default function NewScanPage() {
         // Update or create polygon overlay
         if (currentOverlayRef.current) {
           currentOverlayRef.current.setPath(newVertices);
+          attachPolygonLiveListeners(currentOverlayRef.current);
         } else {
           const poly = new window.google.maps.Polygon({
             map: mapRef.current,
@@ -305,12 +323,13 @@ export default function NewScanPage() {
             draggable: true,
           });
           currentOverlayRef.current = poly;
-          
-          // Listen for path edits
-          const pathListener = poly.getPath().addListener('set_at', () => updateShapeFromOverlay("polygon"));
-          const insertListener = poly.getPath().addListener('insert_at', () => updateShapeFromOverlay("polygon"));
-          const removeListener = poly.getPath().addListener('remove_at', () => updateShapeFromOverlay("polygon"));
-          poly.__listeners = [pathListener, insertListener, removeListener];
+          attachPolygonLiveListeners(poly);
+        }
+        if (newVertices.length >= 3) {
+          const lats = newVertices.map((p) => p.lat);
+          const lngs = newVertices.map((p) => p.lng);
+          const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+          setDrawnShape({ type: "polygon", vertices: newVertices, center });
         }
       } else if (shapeType === "circle" && !drawnShape) {
         // First click = center
@@ -352,16 +371,44 @@ export default function NewScanPage() {
     };
 
     const handleMouseMove = (e) => {
-      if (shapeType === "square" && drawnShape?.firstCorner && isDrawing) {
+      if (shapeType === "polygon" && isDrawing && polygonVertices.length >= 2) {
+        const previewVertices = [...polygonVertices, { lat: e.latLng.lat(), lng: e.latLng.lng() }];
+        const lats = previewVertices.map((p) => p.lat);
+        const lngs = previewVertices.map((p) => p.lng);
+        const center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+        setDrawnShape({ type: "polygon", vertices: previewVertices, center });
+      } else if (shapeType === "square" && drawnShape?.firstCorner && isDrawing) {
         // Draw preview rectangle while dragging
         const corner1 = drawnShape.firstCorner;
         const corner2 = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+        const bounds = new window.google.maps.LatLngBounds(corner1, corner2);
         
         if (currentOverlayRef.current && currentOverlayRef.current instanceof window.google.maps.Rectangle) {
-          currentOverlayRef.current.setBounds(
-            new window.google.maps.LatLngBounds(corner1, corner2)
-          );
+          currentOverlayRef.current.setBounds(bounds);
+        } else {
+          currentOverlayRef.current = new window.google.maps.Rectangle({
+            map: mapRef.current,
+            bounds,
+            strokeColor: "#0ea5e9",
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: "#0ea5e9",
+            fillOpacity: 0.15,
+            editable: false,
+            draggable: false,
+          });
         }
+
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const vertices = [
+          { lat: sw.lat(), lng: sw.lng() },
+          { lat: ne.lat(), lng: sw.lng() },
+          { lat: ne.lat(), lng: ne.lng() },
+          { lat: sw.lat(), lng: ne.lng() },
+        ];
+        const center = { lat: (sw.lat() + ne.lat()) / 2, lng: (sw.lng() + ne.lng()) / 2 };
+        setDrawnShape({ type: "square", firstCorner: corner1, vertices, center });
       }
     };
 
@@ -495,7 +542,14 @@ export default function NewScanPage() {
     if (drawnShape?.firstCorner) {
       updateShapeFromOverlay("square");
       setIsDrawing(false);
-      setDrawnShape(null);
+      if (currentOverlayRef.current instanceof window.google.maps.Rectangle) {
+        currentOverlayRef.current.setEditable(true);
+        currentOverlayRef.current.setDraggable(true);
+        if (!currentOverlayRef.current.__listeners) {
+          const boundsListener = currentOverlayRef.current.addListener('bounds_changed', () => updateShapeFromOverlay("square"));
+          currentOverlayRef.current.__listeners = [boundsListener];
+        }
+      }
     }
   };
 
@@ -578,7 +632,7 @@ export default function NewScanPage() {
     }
   }, [place, keywords, gridSize, spacingKm, drawnShape, gridPoints, router, activeKeyIndex]);
 
-  const totalPoints = gridPoints.length > 0 ? gridPoints.length : gridSize * gridSize;
+  const totalPoints = drawnShape ? gridPoints.length : gridSize * gridSize;
 
   // ── Budget helpers ────────────────────────────────────────────────────────
   const validKw = keywords.filter((k) => k.trim()).length || 1;
@@ -658,7 +712,7 @@ export default function NewScanPage() {
             <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
               <span className="text-xs text-slate-500">
                 Points: <strong className="text-sky-600">{totalPoints}</strong>
-                {gridPoints.length > 0 && " (inside shape)"}
+                {drawnShape && " (inside shape)"}
               </span>
               {drawnShape && (
                 <span className="text-xs text-green-600 font-medium">Area drawn ✓</span>
