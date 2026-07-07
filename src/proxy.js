@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { ACCESS_COOKIE } from "@/lib/supabase-server";
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/supabase-server";
 
 const publicPaths = ["/login"];
 
 export function proxy(request) {
   const { pathname } = request.nextUrl;
   const isPublicPath = publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
-  const hasSession = Boolean(request.cookies.get(ACCESS_COOKIE)?.value);
+  const hasSession = Boolean(request.cookies.get(ACCESS_COOKIE)?.value || request.cookies.get(REFRESH_COOKIE)?.value);
 
   if (!hasSession && !isPublicPath) {
     return NextResponse.redirect(new URL("/login", request.url));

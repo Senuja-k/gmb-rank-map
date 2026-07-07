@@ -1,14 +1,18 @@
 /**
  * GET /api/gbp/reviews
- * Returns all reviews from all saved+enabled GBP locations.
+ * Returns unresponded reviews from all saved+enabled GBP locations by default.
+ * Pass ?view=all to include replied reviews too.
  * Each review is augmented with locationName, locationDisplayName, and email.
  */
 import { NextResponse } from "next/server";
 import { fetchReviewsForLocation } from "@/lib/gbp";
 import { createAdminClient } from "@/lib/supabase-server";
 
-export async function GET() {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const view = searchParams.get("view") === "all" ? "all" : "unresponded";
+    const onlyUnreplied = view !== "all";
     const supabase = createAdminClient();
     const { data: locations, error } = await supabase
       .from("gbp_locations")
@@ -23,7 +27,7 @@ export async function GET() {
         const parent = loc.location_name.startsWith("accounts/")
           ? loc.location_name
           : `${loc.account_name}/${loc.location_name}`;
-        const reviews = await fetchReviewsForLocation(loc.google_email, parent);
+        const reviews = await fetchReviewsForLocation(loc.google_email, parent, { onlyUnreplied });
         return reviews.map((r) => ({
           ...r,
           locationName: loc.location_name,
@@ -41,7 +45,7 @@ export async function GET() {
       .map((r, i) => r.status === "rejected" ? `${locations[i].display_name}: ${r.reason?.message ?? r.reason}` : null)
       .filter(Boolean);
 
-    return NextResponse.json({ reviews, fetchErrors: fetchErrors.length ? fetchErrors : undefined });
+    return NextResponse.json({ view, reviews, fetchErrors: fetchErrors.length ? fetchErrors : undefined });
   } catch (err) {
     console.error("[GBP reviews list]", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

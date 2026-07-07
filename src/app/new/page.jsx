@@ -46,20 +46,24 @@ function getBoundsOfShape(shape, shapeType, center, radiusKm) {
   };
 }
 
-function generateGridInShape(shape, shapeType, center, radiusKm, gridSize, spacingKm) {
+function generateGridInShape(shape, shapeType, center, radiusKm, spacingKm) {
   const bounds = getBoundsOfShape(shape, shapeType, center, radiusKm);
-  const latSpan = bounds.maxLat - bounds.minLat;
-  const lngSpan = bounds.maxLng - bounds.minLng;
   const centerLat = (bounds.minLat + bounds.maxLat) / 2;
   const centerLng = (bounds.minLng + bounds.maxLng) / 2;
-
-  const half = Math.floor(gridSize / 2);
+  const spacing = spacingKm || 1;
+  const latStep = spacing / KM_PER_DEG_LAT;
+  const minRow = Math.ceil((bounds.minLat - centerLat) / latStep);
+  const maxRow = Math.floor((bounds.maxLat - centerLat) / latStep);
   const points = [];
 
-  for (let row = -half; row <= half; row++) {
-    for (let col = -half; col <= half; col++) {
-      const lat = parseFloat((centerLat + (row * spacingKm) / KM_PER_DEG_LAT).toFixed(6));
-      const lng = parseFloat((centerLng + (col * spacingKm) / kmPerDegLng(centerLat)).toFixed(6));
+  for (let row = minRow; row <= maxRow; row++) {
+    const lat = parseFloat((centerLat + row * latStep).toFixed(6));
+    const lngStep = spacing / kmPerDegLng(lat);
+    const minCol = Math.ceil((bounds.minLng - centerLng) / lngStep);
+    const maxCol = Math.floor((bounds.maxLng - centerLng) / lngStep);
+
+    for (let col = minCol; col <= maxCol; col++) {
+      const lng = parseFloat((centerLng + col * lngStep).toFixed(6));
 
       let inside = false;
       if (shapeType === "circle") {
@@ -396,14 +400,14 @@ export default function NewScanPage() {
 
     let pts = [];
     if (drawnShape.type === "square") {
-      pts = generateGridInShape(drawnShape.vertices, "square", drawnShape.center, 0, gridSize, spacingKm);
+      pts = generateGridInShape(drawnShape.vertices, "square", drawnShape.center, 0, spacingKm);
     } else if (drawnShape.type === "circle") {
-      pts = generateGridInShape([], "circle", drawnShape.center, drawnShape.radiusKm, gridSize, spacingKm);
+      pts = generateGridInShape([], "circle", drawnShape.center, drawnShape.radiusKm, spacingKm);
     } else if (drawnShape.type === "polygon") {
-      pts = generateGridInShape(drawnShape.vertices, "polygon", drawnShape.center, 0, gridSize, spacingKm);
+      pts = generateGridInShape(drawnShape.vertices, "polygon", drawnShape.center, 0, spacingKm);
     }
     setGridPoints(pts);
-  }, [drawnShape, gridSize, spacingKm]);
+  }, [drawnShape, spacingKm]);
 
   // ── Render grid point markers on map ──────────────────────────────────────
   useEffect(() => {
@@ -723,8 +727,8 @@ export default function NewScanPage() {
             </div>
 
             {/* Grid config */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
+            <div className={`grid gap-3 ${drawnShape ? "grid-cols-1" : "grid-cols-2"}`}>
+              <div className={drawnShape ? "hidden" : ""}>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
                   Grid Size
                 </label>
@@ -764,13 +768,14 @@ export default function NewScanPage() {
 
             {/* Info */}
             <div className={`rounded-lg p-3 text-xs space-y-1 ${overBudget ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500'}`}>
-              <p><strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{totalPoints}</strong> grid points × <strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{validKw}</strong> keyword(s) = <strong>{totalScans}</strong> total scans</p>
+              <p><strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{totalPoints}</strong> {drawnShape ? "area points" : "grid points"} × <strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{validKw}</strong> keyword(s) = <strong>{totalScans}</strong> total scans</p>
               {overBudget && (
                 <p className="font-semibold text-red-600">
                   ⚠ {overBy.toLocaleString()} calls over free tier limit ({relevantRemaining.toLocaleString()} remaining). Charges will apply at $0.032/call.
                 </p>
               )}
-              {!drawnShape && <p>Draw a shape on the map or we'll use a {gridSize}×{gridSize} grid centered on the business.</p>}
+              {!drawnShape && <p>Draw a shape on the map or we will use a {gridSize}×{gridSize} grid centered on the business.</p>}
+              {drawnShape && <p>The selected area is filled using the spacing above.</p>}
             </div>
 
             {/* Error */}

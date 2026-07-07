@@ -67,6 +67,7 @@ export default function ReviewsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fetchErrors, setFetchErrors] = useState([]);
+  const [reviewView, setReviewView] = useState("unresponded");
   const [filter, setFilter] = useState("all");
   const [starFilter, setStarFilter] = useState(new Set());
   const [selected, setSelected] = useState(new Set());
@@ -121,14 +122,15 @@ export default function ReviewsPage() {
   const loadReviews = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const res = await fetch("/api/gbp/reviews");
+      const res = await fetch(`/api/gbp/reviews?view=${reviewView === "all" ? "all" : "unresponded"}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load reviews");
       setReviews(data.reviews ?? []);
       setFetchErrors(data.fetchErrors ?? []);
+      setSelected(new Set());
     } catch (err) { setError(err.message); setFetchErrors([]); }
     finally { setLoading(false); }
-  }, []);
+  }, [reviewView]);
 
   useEffect(() => { loadReviews(); }, [loadReviews]);
 
@@ -136,13 +138,14 @@ export default function ReviewsPage() {
     .map(([locationName, displayName]) => ({ locationName, displayName }));
   const locationFilteredReviews = filter === "all" ? reviews : reviews.filter((r) => r.locationName === filter);
   const locationFilteredUnanswered = locationFilteredReviews.filter((r) => !r.reviewReply);
+  const starBaseReviews = reviewView === "all" ? locationFilteredReviews : locationFilteredUnanswered;
   const starCounts = STAR_OPTIONS.reduce((acc, star) => {
-    acc[star] = locationFilteredUnanswered.filter((r) => starCount(r.starRating) === star).length;
+    acc[star] = starBaseReviews.filter((r) => starCount(r.starRating) === star).length;
     return acc;
   }, {});
   const filteredReviews = starFilter.size === 0
     ? locationFilteredReviews
-    : locationFilteredUnanswered.filter((r) => starFilter.has(starCount(r.starRating)));
+    : locationFilteredReviews.filter((r) => starFilter.has(starCount(r.starRating)));
   const unansweredFiltered = filteredReviews.filter((r) => !r.reviewReply);
   const selectedReviews = filteredReviews.filter((r) => selected.has(r.name));
 
@@ -173,6 +176,12 @@ export default function ReviewsPage() {
     }
   }
   function selectModel(id) { setGeminiModel(id); localStorage.setItem(AI_MODEL_KEY, id); }
+  function changeReviewView(view) {
+    setReviewView(view);
+    setFilter("all");
+    setStarFilter(new Set());
+    setSelected(new Set());
+  }
 
   async function handleAutoRespond() {
     if (!selectedReviews.length) return;
@@ -291,7 +300,11 @@ export default function ReviewsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[#1a2b4a]">Reviews</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage and respond to reviews across all locations.</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {reviewView === "all"
+              ? "Manage and respond to all reviews across all locations."
+              : "Manage reviews that still need replies across all locations."}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { setInstructionDraft(instruction); setShowSettings(true); }} className="flex items-center gap-1.5 p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors" title="AI Reply Settings">
@@ -308,6 +321,23 @@ export default function ReviewsPage() {
             Refresh
           </button>
         </div>
+      </div>
+
+      <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <button
+          onClick={() => changeReviewView("unresponded")}
+          className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${reviewView === "unresponded" ? "bg-sky-500 text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}
+          aria-pressed={reviewView === "unresponded"}
+        >
+          Unresponded
+        </button>
+        <button
+          onClick={() => changeReviewView("all")}
+          className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${reviewView === "all" ? "bg-sky-500 text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}
+          aria-pressed={reviewView === "all"}
+        >
+          All Reviews
+        </button>
       </div>
 
       {locations.length > 0 && (
@@ -369,7 +399,9 @@ export default function ReviewsPage() {
       )}
 
       {loading ? (
-        <div className="text-center py-16 text-slate-400 text-sm">Loading reviews\u2026</div>
+        <div className="text-center py-16 text-slate-400 text-sm">
+          {reviewView === "all" ? "Loading all reviews\u2026" : "Loading unresponded reviews\u2026"}
+        </div>
       ) : error ? (
         <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4">
           <p className="text-sm font-medium text-red-700">Error</p>
@@ -377,7 +409,7 @@ export default function ReviewsPage() {
         </div>
       ) : filteredReviews.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
-          <p className="text-sm">No reviews found.</p>
+          <p className="text-sm">{reviewView === "all" ? "No reviews found." : "No unresponded reviews found."}</p>
           {fetchErrors.length > 0 ? (
             <div className="mt-4 text-left max-w-md mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
               <p className="text-xs font-semibold text-amber-700">Could not fetch reviews from some locations:</p>
@@ -497,12 +529,12 @@ export default function ReviewsPage() {
 
       {reviewModalOpen && reviewQueue[queueIndex] && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[calc(100dvh-2rem)] p-6 flex flex-col gap-4 overflow-hidden">
+            <div className="flex items-center justify-between shrink-0">
               <h2 className="text-base font-bold text-slate-800">Review &amp; Respond</h2>
               <span className="text-xs text-slate-400 font-medium">{queueIndex + 1} / {reviewQueue.length}</span>
             </div>
-            <div className="bg-slate-50 rounded-xl px-4 py-3 space-y-1">
+            <div className="bg-slate-50 rounded-xl px-4 py-3 space-y-1 max-h-[36dvh] overflow-y-auto overscroll-contain">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-800">{reviewQueue[queueIndex].reviewer?.displayName ?? "Anonymous"}</span>
                 <Stars rating={reviewQueue[queueIndex].starRating} />
@@ -522,7 +554,7 @@ export default function ReviewsPage() {
                 </div>
               )}
             </div>
-            <div>
+            <div className="shrink-0">
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">AI-Generated Reply <span className="font-normal text-slate-400">(edit before posting)</span></label>
               {generatingReply ? (
                 <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-400 bg-slate-50 min-h-[100px] flex items-center justify-center">Generating reply…</div>
@@ -555,8 +587,8 @@ export default function ReviewsPage() {
                 <textarea value={currentReply} onChange={(e) => setCurrentReply(e.target.value)} rows={5} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none" />
               )}
             </div>
-            {postError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{postError}</p>}
-            <div className="flex items-center justify-between">
+            {postError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 shrink-0">{postError}</p>}
+            <div className="flex items-center justify-between shrink-0">
               <button onClick={() => { setReviewModalOpen(false); setSelected(new Set()); loadReviews(); }} className="text-xs text-slate-400 hover:text-slate-600">Cancel all</button>
               <div className="flex gap-2">
                 <button onClick={skipCurrentReply} disabled={generatingReply || postingReply} className="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 px-4 py-1.5 rounded-lg transition-colors">Skip</button>

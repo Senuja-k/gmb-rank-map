@@ -49,8 +49,9 @@ const DEFAULT_REVIEW_INSTRUCTION =
 
 // ── 1. Review helpers ─────────────────────────────────────────────────────────
 
-/** Fetch all reviews for a single location. */
-export async function fetchReviewsForLocation(email, locationName) {
+/** Fetch reviews for a single location. */
+export async function fetchReviewsForLocation(email, locationName, options = {}) {
+  const { onlyUnreplied = false } = options;
   const auth = await getAuthClientByEmail(email);
   const reviews = [];
   let pageToken = "";
@@ -64,7 +65,8 @@ export async function fetchReviewsForLocation(email, locationName) {
       method: "GET",
     });
 
-    reviews.push(...(res.data.reviews ?? []));
+    const pageReviews = res.data.reviews ?? [];
+    reviews.push(...(onlyUnreplied ? pageReviews.filter((review) => !review.reviewReply) : pageReviews));
     pageToken = res.data.nextPageToken ?? "";
   } while (pageToken);
 

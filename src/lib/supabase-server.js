@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 
 export const ACCESS_COOKIE = "gbp_access_token";
 export const REFRESH_COOKIE = "gbp_refresh_token";
+export const AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 5;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -34,12 +35,23 @@ export function createAdminClient() {
 export async function getCurrentUser() {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_COOKIE)?.value;
+  const refreshToken = cookieStore.get(REFRESH_COOKIE)?.value;
 
-  if (!accessToken) return null;
+  if (!accessToken && !refreshToken) return null;
 
-  const supabase = createAnonServerClient(accessToken);
-  const { data, error } = await supabase.auth.getUser(accessToken);
-  if (error || !data.user) return null;
+  if (accessToken) {
+    const supabase = createAnonServerClient(accessToken);
+    const { data, error } = await supabase.auth.getUser(accessToken);
+    if (!error && data.user) return data.user;
+  }
+
+  if (!refreshToken) return null;
+
+  const supabase = createAnonServerClient();
+  const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+  if (error || !data.session || !data.user) return null;
+
+  setAuthCookiesOnStore(cookieStore, data.session);
 
   return data.user;
 }
@@ -86,15 +98,29 @@ export function setAuthCookies(response, session) {
     sameSite: "lax",
     secure,
     path: "/",
-    maxAge: session.expires_in ?? 3600,
+    maxAge: AUTH_COOKIE_MAX_AGE,
   });
   response.cookies.set(REFRESH_COOKIE, session.refresh_token, {
     httpOnly: true,
     sameSite: "lax",
     secure,
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: AUTH_COOKIE_MAX_AGE,
   });
+}
+
+function setAuthCookiesOnStore(cookieStore, session) {
+  const secure = process.env.NODE_ENV === "production";
+  const options = {
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    path: "/",
+    maxAge: AUTH_COOKIE_MAX_AGE,
+  };
+
+  cookieStore.set(ACCESS_COOKIE, session.access_token, options);
+  cookieStore.set(REFRESH_COOKIE, session.refresh_token, options);
 }
 
 export function clearAuthCookies(response) {
