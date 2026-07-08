@@ -106,6 +106,18 @@ export default function ReviewsPage() {
     setModelUsage(readUsageToday());
   }, []);
 
+  useEffect(() => {
+    const refreshModelUsage = () => setModelUsage(readUsageToday());
+    window.addEventListener("focus", refreshModelUsage);
+    window.addEventListener("storage", refreshModelUsage);
+    document.addEventListener("visibilitychange", refreshModelUsage);
+    return () => {
+      window.removeEventListener("focus", refreshModelUsage);
+      window.removeEventListener("storage", refreshModelUsage);
+      document.removeEventListener("visibilitychange", refreshModelUsage);
+    };
+  }, []);
+
   // Countdown ticker for rate-limit banner
   useEffect(() => {
     if (!rateLimitUntil) return;
