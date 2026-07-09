@@ -313,9 +313,10 @@ export async function getShowroomStats(email, locationName, dateRange = {}) {
 
   const auth = await getAuthClientByEmail(email);
   const performance = google.businessprofileperformance({ version: "v1", auth });
+  const performanceLocationName = normalizePerformanceLocationName(locationName);
 
   const res = await performance.locations.fetchMultiDailyMetricsTimeSeries({
-    location: locationName,
+    location: performanceLocationName,
     dailyMetrics: [
       "WEBSITE_CLICKS",
       "CALL_CLICKS",
@@ -351,4 +352,10 @@ export async function getShowroomStats(email, locationName, dateRange = {}) {
     }
   }
   return result;
+}
+
+function normalizePerformanceLocationName(locationName) {
+  if (!locationName) return locationName;
+  const locationsIndex = locationName.indexOf("locations/");
+  return locationsIndex >= 0 ? locationName.slice(locationsIndex) : locationName;
 }

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -91,9 +91,10 @@ function getStoredKeyIndex() {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [budgets, setBudgets] = useState(null); // array of 4 budget objects
   const [budgetError, setBudgetError] = useState(false);
-  const [activeKeyIndex, setActiveKeyIndex] = useState(0);
+  const [activeKeyIndex, setActiveKeyIndex] = useState(() => getStoredKeyIndex());
   const [profile, setProfile] = useState(null);
 
   const hiddenRoutes = ["/login"];
@@ -120,25 +121,35 @@ export default function Sidebar() {
     : navItems;
 
   useEffect(() => {
-    setActiveKeyIndex(getStoredKeyIndex());
-  }, []);
-
-  useEffect(() => {
     if (isHidden) return;
     fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setProfile(data?.profile ?? null))
+      .then((r) => {
+        if (r.status === 401) {
+          router.replace("/login");
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      })
+      .then((data) => {
+        if (data) setProfile(data.profile ?? null);
+      })
       .catch(() => setProfile(null));
-  }, [isHidden]);
+  }, [isHidden, router]);
 
   useEffect(() => {
     if (isHidden) return;
     fetch("/api/budget")
       .then((r) => {
+        if (r.status === 401) {
+          setBudgets(null);
+          setBudgetError(false);
+          return null;
+        }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((d) => {
+        if (!d) return;
         if (Array.isArray(d)) {
           setBudgets(d);
           setBudgetError(false);

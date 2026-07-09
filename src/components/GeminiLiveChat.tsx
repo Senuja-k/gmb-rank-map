@@ -73,6 +73,10 @@ export default function GeminiLiveChat() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (res.status === 401) {
+          window.location.href = '/login';
+          throw new Error('Please sign in again to use the assistant.');
+        }
         throw new Error(data.error || `Assistant request failed (${res.status})`);
       }
 
