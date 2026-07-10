@@ -41,11 +41,12 @@ export default function HeatmapDetailPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [hideColors, setHideColors] = useState(false);
+  const [selectedPointIndex, setSelectedPointIndex] = useState(null);
 
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
-  const [mapsLoaded, setMapsLoaded] = useState(false);
+  const [mapsLoaded, setMapsLoaded] = useState(() => typeof window !== "undefined" && Boolean(window.google?.maps));
 
   // ── Fetch scan data ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -67,8 +68,9 @@ export default function HeatmapDetailPage({ params }) {
   // ── Load Google Maps ──────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (mapsLoaded) return;
     if (window.google?.maps) {
-      setMapsLoaded(true);
+      queueMicrotask(() => setMapsLoaded(true));
       return;
     }
     if (window.__gmapsLoading) {
@@ -91,7 +93,7 @@ export default function HeatmapDetailPage({ params }) {
     script.defer = true;
     script.onload = () => setMapsLoaded(true);
     document.head.appendChild(script);
-  }, []);
+  }, [mapsLoaded]);
 
   // ── Render map with grid overlay ──────────────────────────────────────────
   useEffect(() => {
@@ -116,22 +118,32 @@ export default function HeatmapDetailPage({ params }) {
     markersRef.current = [];
 
     // Add grid markers
-    scan.gridPoints.forEach((point) => {
+    scan.gridPoints.forEach((point, pointIndex) => {
       const bg = hideColors ? "#9e9e9e" : rankBg(point.rank);
       const label = point.rank > 20 ? "20+" : String(point.rank);
+      const isSelected = selectedPointIndex === pointIndex;
 
       const markerContent = document.createElement("div");
       markerContent.className = "grid-marker";
       markerContent.style.backgroundColor = bg;
+      markerContent.style.cursor = "pointer";
+      markerContent.style.boxShadow = isSelected
+        ? "0 0 0 3px #0ea5e9, 0 8px 18px rgba(14, 165, 233, 0.35)"
+        : "";
+      markerContent.style.transform = isSelected ? "scale(1.12)" : "";
       markerContent.textContent = label;
+      markerContent.title = `Point ${pointIndex + 1}: rank ${label}`;
+      markerContent.addEventListener("click", () => setSelectedPointIndex(pointIndex));
 
       try {
         const marker = new window.google.maps.marker.AdvancedMarkerElement({
           map: mapRef.current,
           position: { lat: point.lat, lng: point.lng },
           content: markerContent,
-          title: `Rank: ${label}`,
+          title: `Point ${pointIndex + 1}: rank ${label}`,
+          zIndex: isSelected ? 200 : 1,
         });
+        marker.addListener?.("click", () => setSelectedPointIndex(pointIndex));
         markersRef.current.push(marker);
       } catch {
         // Fallback if AdvancedMarkerElement isn't available
@@ -193,8 +205,11 @@ export default function HeatmapDetailPage({ params }) {
         if (c.lat && c.lng) bounds.extend({ lat: c.lat, lng: c.lng });
       });
     }
-    mapRef.current.fitBounds(bounds, 40);
-  }, [mapsLoaded, scan, hideColors]);
+    if (!mapRef.current.__boundsFit) {
+      mapRef.current.fitBounds(bounds, 40);
+      mapRef.current.__boundsFit = true;
+    }
+  }, [mapsLoaded, scan, hideColors, selectedPointIndex]);
 
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDelete = useCallback(async () => {
@@ -226,11 +241,20 @@ export default function HeatmapDetailPage({ params }) {
   const gridArea = (scan.gridSize * scan.spacingKm) ** 2;
   const betweenPoints = scan.spacingKm * 1000;
   const top3Count = scan.gridPoints.filter((p) => p.rank <= 3).length;
+  const selectedPoint = selectedPointIndex === null ? null : scan.gridPoints[selectedPointIndex];
+  const selectedPointRank = selectedPoint?.rank ?? null;
+  const selectedPointCompetitors = selectedPoint?.competitors ?? [];
+  const selectedPointTop3 = selectedPointRank !== null && selectedPointRank <= 3;
 
   const competitorsWithPosition = scan.competitors.map((c, i) => ({
     ...c,
     position: i + 1,
   }));
+  const tableCompetitors = selectedPoint
+    ? selectedPointCompetitors.map((c) => ({ ...c, position: c.rank }))
+    : competitorsWithPosition;
+  const displayRank = selectedPoint ? selectedPointRank : scan.avgRank;
+  const displayTop3Pct = selectedPoint ? (selectedPointTop3 ? 100 : 0) : scan.top3Pct;
 
   return (
     <div className="px-8 py-8">
@@ -272,13 +296,13 @@ export default function HeatmapDetailPage({ params }) {
           {/* Stats */}
           <div className="flex gap-6 text-center">
             <div>
-              <p className="text-xs text-slate-400 mb-1">Avg Ranking</p>
-              <span className={rankBadgeClass(scan.avgRank)}>{scan.avgRank}</span>
+              <p className="text-xs text-slate-400 mb-1">{selectedPoint ? "Point Ranking" : "Avg Ranking"}</p>
+              <span className={rankBadgeClass(displayRank)}>{displayRank > 20 ? "20+" : displayRank}</span>
             </div>
             <div>
-              <p className="text-xs text-slate-400 mb-1">Top 3%</p>
-              <span className={top3BadgeClass(scan.top3Pct)}>
-                {scan.top3Pct}%
+              <p className="text-xs text-slate-400 mb-1">{selectedPoint ? "Point Top 3" : "Top 3%"}</p>
+              <span className={top3BadgeClass(displayTop3Pct)}>
+                {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${scan.top3Pct}%`}
               </span>
             </div>
           </div>
@@ -308,6 +332,12 @@ export default function HeatmapDetailPage({ params }) {
                 <span className="text-slate-400">({scan.totalPoints} Points)</span>
               </span>
             </div>
+            {selectedPoint && (
+              <div className="flex gap-2">
+                <span className="text-slate-400">Selected:</span>
+                <span className="font-medium text-sky-600">Point {selectedPointIndex + 1}</span>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
@@ -338,9 +368,9 @@ export default function HeatmapDetailPage({ params }) {
             <thead>
               <tr className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <th className="px-3 py-2">Location</th>
-                <th className="px-3 py-2 text-center">Avg Rank</th>
+                <th className="px-3 py-2 text-center">{selectedPoint ? "Rank" : "Avg Rank"}</th>
                 <th className="px-3 py-2 text-center">Position</th>
-                <th className="px-3 py-2 text-center">Top 3%</th>
+                <th className="px-3 py-2 text-center">{selectedPoint ? "Top 3" : "Top 3%"}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -357,20 +387,22 @@ export default function HeatmapDetailPage({ params }) {
                   </div>
                 </td>
                 <td className="px-3 py-2.5 text-center">
-                  <span className={rankBadgeClass(scan.avgRank)}>
-                    {scan.avgRank}
+                  <span className={rankBadgeClass(displayRank)}>
+                    {displayRank > 20 ? "20+" : displayRank}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-center text-slate-500">—</td>
+                <td className="px-3 py-2.5 text-center text-slate-500">
+                  {selectedPoint ? (selectedPointRank > 20 ? "20+" : selectedPointRank) : "—"}
+                </td>
                 <td className="px-3 py-2.5 text-center">
-                  <span className={top3BadgeClass(scan.top3Pct)}>
-                    {scan.top3Pct}%
+                  <span className={top3BadgeClass(displayTop3Pct)}>
+                    {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${scan.top3Pct}%`}
                   </span>
                 </td>
               </tr>
 
               {/* Competitors */}
-              {competitorsWithPosition.slice(0, 20).map((comp) => (
+              {tableCompetitors.slice(0, 20).map((comp) => (
                 <tr key={comp.placeId}>
                   <td className="px-3 py-2.5">
                     <span className="truncate max-w-[180px] block text-slate-700">
@@ -378,16 +410,16 @@ export default function HeatmapDetailPage({ params }) {
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-center">
-                    <span className={rankBadgeClass(comp.avgRank)}>
-                      {comp.avgRank}
+                    <span className={rankBadgeClass(selectedPoint ? comp.rank : comp.avgRank)}>
+                      {selectedPoint ? (comp.rank > 20 ? "20+" : comp.rank) : comp.avgRank}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-center text-slate-500">
                     {comp.position}{comp.position === 1 ? "st" : comp.position === 2 ? "nd" : comp.position === 3 ? "rd" : "th"}
                   </td>
                   <td className="px-3 py-2.5 text-center">
-                    <span className={top3BadgeClass(comp.top3Pct)}>
-                      {comp.top3Pct}%
+                    <span className={top3BadgeClass(selectedPoint ? (comp.rank <= 3 ? 100 : 0) : comp.top3Pct)}>
+                      {selectedPoint ? (comp.rank <= 3 ? "Yes" : "No") : `${comp.top3Pct}%`}
                     </span>
                   </td>
                 </tr>
@@ -408,7 +440,20 @@ export default function HeatmapDetailPage({ params }) {
               <span className="text-slate-400 mr-1.5">Keywords:</span>
               <span className="font-medium">{scan.keyword}</span>
             </div>
+            {selectedPoint && (
+              <div className="text-sm">
+                <span className="text-slate-400 mr-1.5">Viewing:</span>
+                <span className="font-medium text-sky-600">Point {selectedPointIndex + 1}</span>
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => setSelectedPointIndex(null)}
+                disabled={!selectedPoint}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:border-sky-300 hover:text-sky-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600 transition-colors"
+              >
+                All Average
+              </button>
               <span className="text-sm text-slate-500">Hide Colors</span>
               <button
                 onClick={() => setHideColors(!hideColors)}
@@ -457,35 +502,37 @@ export default function HeatmapDetailPage({ params }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
-            Avg Rank
+            {selectedPoint ? "Point Rank" : "Avg Rank"}
           </p>
-          <p className="text-2xl font-bold text-[#1a2b4a]">{scan.avgRank}</p>
+          <p className="text-2xl font-bold text-[#1a2b4a]">{displayRank > 20 ? "20+" : displayRank}</p>
         </div>
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
-            Top 3 Points
+            {selectedPoint ? "Point Top 3" : "Top 3 Points"}
           </p>
           <p className="text-2xl font-bold text-green-600">
-            {top3Count}
-            <span className="text-base text-slate-400 font-normal">
-              /{scan.totalPoints}
-            </span>
+            {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : top3Count}
+            {!selectedPoint && (
+              <span className="text-base text-slate-400 font-normal">
+                /{scan.totalPoints}
+              </span>
+            )}
           </p>
         </div>
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
-            Competitors Found
+            {selectedPoint ? "Point Competitors" : "Competitors Found"}
           </p>
           <p className="text-2xl font-bold text-[#1a2b4a]">
-            {scan.competitors.length}
+            {selectedPoint ? selectedPointCompetitors.length : scan.competitors.length}
           </p>
         </div>
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
-            Not Ranking
+            {selectedPoint ? "Point Status" : "Not Ranking"}
           </p>
           <p className="text-2xl font-bold text-red-500">
-            {scan.gridPoints.filter((p) => p.rank > 20).length}
+            {selectedPoint ? (selectedPointRank > 20 ? "Not Ranking" : "Ranking") : scan.gridPoints.filter((p) => p.rank > 20).length}
           </p>
         </div>
       </div>
