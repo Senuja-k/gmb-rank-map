@@ -2,6 +2,11 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { fetchReviewsForLocation, getShowroomStats } from "@/lib/gbp";
 import { listReviewReports } from "@/lib/review-reports";
+import {
+  canAffordGeminiSearchGrounding,
+  getGeminiSearchGroundingStatus,
+  recordGeminiSearchGrounding,
+} from "@/lib/budget";
 import { clearAuthCookies, createAdminClient, requireCurrentProfile } from "@/lib/supabase-server";
 
 const SYSTEM_INSTRUCTION = `You are a read-only AI assistant for GBP Manager.
@@ -22,6 +27,18 @@ const ALLOWED_MODELS = [
   "gemini-3.5-flash",
   "gemini-2.5-flash",
 ].filter(Boolean);
+
+const SEARCH_MODELS = [
+  process.env.GEMINI_MODEL_3_5_FLASH,
+  process.env.GEMINI_MODEL,
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+].filter(Boolean);
+
+function uniqueModels(models) {
+  return [...new Set(models)];
+}
 
 function toGeminiRole(role) {
   return role === "assistant" ? "model" : "user";
@@ -378,17 +395,90 @@ function appendContext(contents, businessContext) {
   ];
 }
 
-function modelConfig(modelName, useWebSearch) {
-  const config = {
+function modelConfig(modelName) {
+  return {
     model: modelName,
     systemInstruction: SYSTEM_INSTRUCTION,
   };
+}
 
-  if (useWebSearch) {
-    config.tools = [{ googleSearchRetrieval: {} }];
+function contentsToInteractionInput(contents) {
+  const conversation = contents
+    .map((message) => {
+      const label = message.role === "model" ? "Assistant" : "User";
+      return `${label}: ${message.parts?.map((part) => part.text ?? "").join("\n") ?? ""}`;
+    })
+    .join("\n\n");
+
+  return `${SYSTEM_INSTRUCTION}\n\n${conversation}`;
+}
+
+function extractInteractionOutput(data) {
+  const directText = data.outputText ?? data.output_text;
+  if (directText) return { text: directText, citations: [] };
+
+  const textParts = [];
+  const citations = [];
+  for (const step of data.steps ?? []) {
+    if (step.type !== "model_output") continue;
+    for (const block of step.content ?? []) {
+      if (block.type !== "text" || !block.text) continue;
+      textParts.push(block.text);
+      for (const annotation of block.annotations ?? []) {
+        if (annotation.type === "url_citation" && annotation.url) {
+          citations.push({
+            title: annotation.title ?? annotation.url,
+            url: annotation.url,
+          });
+        }
+      }
+    }
   }
 
-  return config;
+  return { text: textParts.join("\n\n"), citations };
+}
+
+function appendCitations(reply, citations) {
+  const unique = [];
+  const seen = new Set();
+  for (const citation of citations) {
+    if (seen.has(citation.url)) continue;
+    seen.add(citation.url);
+    unique.push(citation);
+  }
+
+  if (!unique.length) return reply;
+  return `${reply}\n\nSources:\n${unique.map((citation) => `- [${citation.title}](${citation.url})`).join("\n")}`;
+}
+
+async function generateWithGoogleSearch(apiKey, modelName, contents) {
+  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      model: modelName,
+      input: contentsToInteractionInput(contents),
+      tools: [{ type: "google_search" }],
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const message = data.error?.message ?? `Google Search grounding failed (${res.status})`;
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
+  }
+
+  const { text, citations } = extractInteractionOutput(data);
+  if (!text) throw new Error("Google Search grounding returned no text.");
+  return {
+    reply: appendCitations(text, citations),
+    citations,
+  };
 }
 
 export async function POST(req) {
@@ -413,34 +503,51 @@ export async function POST(req) {
     const genAI = new GoogleGenerativeAI(apiKey);
     let lastError;
 
-    for (const modelName of ALLOWED_MODELS) {
+    if (useWebSearch) {
+      for (const modelName of uniqueModels(SEARCH_MODELS)) {
+        try {
+          const budgetCheck = await canAffordGeminiSearchGrounding(1);
+          if (!budgetCheck.allowed) {
+            return NextResponse.json(
+              {
+                error: `Monthly Gemini Search grounding free limit reached (${budgetCheck.remaining} of ${budgetCheck.limit} prompts remaining). Resets next month.`,
+                searchBudget: budgetCheck.status,
+              },
+              { status: 429 }
+            );
+          }
+          const searchBudget = await recordGeminiSearchGrounding(1);
+          const result = await generateWithGoogleSearch(apiKey, modelName, promptContents);
+          return NextResponse.json({
+            reply: result.reply,
+            model: modelName,
+            usedBusinessData: Boolean(businessContext),
+            usedWebSearch: true,
+            searchBudget,
+            citations: result.citations,
+          });
+        } catch (err) {
+          lastError = err;
+        }
+      }
+    }
+
+    for (const modelName of uniqueModels(ALLOWED_MODELS)) {
       try {
-        const model = genAI.getGenerativeModel(modelConfig(modelName, useWebSearch));
+        const model = genAI.getGenerativeModel(modelConfig(modelName));
         const result = await model.generateContent({ contents: promptContents });
         const reply = result.response.text();
         return NextResponse.json({
-          reply,
+          reply: useWebSearch
+            ? `${reply}\n\nNote: Web search was requested, but Google Search grounding was unavailable for this request, so I answered using app data/model knowledge only.`
+            : reply,
           model: modelName,
           usedBusinessData: Boolean(businessContext),
-          usedWebSearch: useWebSearch,
+          usedWebSearch: false,
+          searchBudget: useWebSearch ? await getGeminiSearchGroundingStatus() : undefined,
         });
       } catch (err) {
         lastError = err;
-        if (useWebSearch) {
-          try {
-            const model = genAI.getGenerativeModel(modelConfig(modelName, false));
-            const result = await model.generateContent({ contents: promptContents });
-            const reply = result.response.text();
-            return NextResponse.json({
-              reply: `${reply}\n\nNote: Web search was requested, but Gemini Search grounding was unavailable for this request, so I answered using app data/model knowledge only.`,
-              model: modelName,
-              usedBusinessData: Boolean(businessContext),
-              usedWebSearch: false,
-            });
-          } catch (fallbackErr) {
-            lastError = fallbackErr;
-          }
-        }
       }
     }
 

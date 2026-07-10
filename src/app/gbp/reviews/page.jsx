@@ -39,9 +39,18 @@ const DEFAULT_INSTRUCTION =
 
 const STAR_MAP = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
 const STAR_OPTIONS = [5, 4, 3, 2, 1];
+const LONG_UNREPLIED_MIN_CHARS = 450;
 
 function starCount(rating) {
   return STAR_MAP[rating] ?? 0;
+}
+
+function reviewTextLength(review) {
+  return (review.comment ?? "").trim().length;
+}
+
+function isLongUnreplied(review) {
+  return !review.reviewReply && reviewTextLength(review) > LONG_UNREPLIED_MIN_CHARS;
 }
 
 function Stars({ rating }) {
@@ -90,6 +99,8 @@ export default function ReviewsPage() {
   const [savingInstruction, setSavingInstruction] = useState(false);
   const [geminiModel, setGeminiModel] = useState(DEFAULT_MODEL);
   const [modelUsage, setModelUsage] = useState({});
+  const [showReviewCustomPrompt, setShowReviewCustomPrompt] = useState(false);
+  const [reviewCustomPromptDraft, setReviewCustomPromptDraft] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -149,15 +160,17 @@ export default function ReviewsPage() {
   const locations = [...new Map(reviews.map((r) => [r.locationName, r.locationDisplayName])).entries()]
     .map(([locationName, displayName]) => ({ locationName, displayName }));
   const locationFilteredReviews = filter === "all" ? reviews : reviews.filter((r) => r.locationName === filter);
-  const locationFilteredUnanswered = locationFilteredReviews.filter((r) => !r.reviewReply);
-  const starBaseReviews = reviewView === "all" ? locationFilteredReviews : locationFilteredUnanswered;
+  const viewFilteredReviews = reviewView === "long-unreplied"
+    ? locationFilteredReviews.filter(isLongUnreplied)
+    : locationFilteredReviews;
+  const starBaseReviews = viewFilteredReviews;
   const starCounts = STAR_OPTIONS.reduce((acc, star) => {
     acc[star] = starBaseReviews.filter((r) => starCount(r.starRating) === star).length;
     return acc;
   }, {});
   const filteredReviews = starFilter.size === 0
-    ? locationFilteredReviews
-    : locationFilteredReviews.filter((r) => starFilter.has(starCount(r.starRating)));
+    ? viewFilteredReviews
+    : viewFilteredReviews.filter((r) => starFilter.has(starCount(r.starRating)));
   const unansweredFiltered = filteredReviews.filter((r) => !r.reviewReply);
   const selectedReviews = filteredReviews.filter((r) => selected.has(r.name));
 
@@ -227,14 +240,23 @@ export default function ReviewsPage() {
     await generateForIndex(queue, 0);
   }
 
-  async function generateForIndex(queue, idx) {
+  async function generateForIndex(queue, idx, customInstructionOverride = null) {
     const review = queue[idx]; if (!review) return;
     setGeneratingReply(true); setCurrentReply(""); setPostError(""); setServiceUnavailable(false);
     try {
       const photoUrls = review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [];
       const res = await fetch("/api/gbp/reviews/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: review.email, locationName: review.locationName, reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "", customInstruction: instruction, reviewPhotos: photoUrls, geminiModel, starRating: review.starRating }),
+        body: JSON.stringify({
+          email: review.email,
+          locationName: review.locationName,
+          reviewerName: review.reviewer?.displayName ?? "Customer",
+          reviewText: review.comment ?? "",
+          customInstruction: customInstructionOverride ?? instruction,
+          reviewPhotos: photoUrls,
+          geminiModel,
+          starRating: review.starRating,
+        }),
       });
       const data = await res.json();
       if (res.status === 429) {
@@ -257,6 +279,12 @@ export default function ReviewsPage() {
     await generateForIndex(reviewQueue, queueIndex);
   }
 
+  async function generateWithReviewCustomPrompt() {
+    const prompt = reviewCustomPromptDraft.trim();
+    if (!prompt) return;
+    await generateForIndex(reviewQueue, queueIndex, `${instruction}\n\nFor this review only, also follow this custom instruction:\n${prompt}`);
+  }
+
   async function postCurrentReply() {
     const review = reviewQueue[queueIndex]; if (!review || !currentReply) return;
     setPostingReply(true); setPostError("");
@@ -274,6 +302,8 @@ export default function ReviewsPage() {
 
   async function advanceQueue() {
     const nextIdx = queueIndex + 1;
+    setShowReviewCustomPrompt(false);
+    setReviewCustomPromptDraft("");
     if (nextIdx < reviewQueue.length) { setQueueIndex(nextIdx); await generateForIndex(reviewQueue, nextIdx); }
     else { setReviewModalOpen(false); setSelected(new Set()); await loadReviews(); }
   }
@@ -315,6 +345,8 @@ export default function ReviewsPage() {
           <p className="text-sm text-slate-500 mt-1">
             {reviewView === "all"
               ? "Manage and respond to all reviews across all locations."
+              : reviewView === "long-unreplied"
+                ? `Review unreplied customer messages longer than ${LONG_UNREPLIED_MIN_CHARS} characters.`
               : "Manage reviews that still need replies across all locations."}
           </p>
         </div>
@@ -342,6 +374,13 @@ export default function ReviewsPage() {
           aria-pressed={reviewView === "unresponded"}
         >
           Unresponded
+        </button>
+        <button
+          onClick={() => changeReviewView("long-unreplied")}
+          className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${reviewView === "long-unreplied" ? "bg-sky-500 text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}
+          aria-pressed={reviewView === "long-unreplied"}
+        >
+          Long Unreplied
         </button>
         <button
           onClick={() => changeReviewView("all")}
@@ -412,7 +451,11 @@ export default function ReviewsPage() {
 
       {loading ? (
         <div className="text-center py-16 text-slate-400 text-sm">
-          {reviewView === "all" ? "Loading all reviews\u2026" : "Loading unresponded reviews\u2026"}
+          {reviewView === "all"
+            ? "Loading all reviews\u2026"
+            : reviewView === "long-unreplied"
+              ? "Loading long unreplied reviews\u2026"
+              : "Loading unresponded reviews\u2026"}
         </div>
       ) : error ? (
         <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4">
@@ -421,7 +464,13 @@ export default function ReviewsPage() {
         </div>
       ) : filteredReviews.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
-          <p className="text-sm">{reviewView === "all" ? "No reviews found." : "No unresponded reviews found."}</p>
+          <p className="text-sm">
+            {reviewView === "all"
+              ? "No reviews found."
+              : reviewView === "long-unreplied"
+                ? `No unreplied reviews longer than ${LONG_UNREPLIED_MIN_CHARS} characters found.`
+                : "No unresponded reviews found."}
+          </p>
           {fetchErrors.length > 0 ? (
             <div className="mt-4 text-left max-w-md mx-auto bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1">
               <p className="text-xs font-semibold text-amber-700">Could not fetch reviews from some locations:</p>
@@ -449,6 +498,11 @@ export default function ReviewsPage() {
                         <Stars rating={review.starRating} />
                       </div>
                       <div className="flex items-center gap-2">
+                        {isLongUnreplied(review) && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                            {reviewTextLength(review).toLocaleString()} chars
+                          </span>
+                        )}
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${hasReply ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{hasReply ? "Replied" : "No reply"}</span>
                         <span className="text-[11px] text-slate-400">{formatDate(review.createTime)}</span>
                       </div>
@@ -546,7 +600,7 @@ export default function ReviewsPage() {
               <h2 className="text-base font-bold text-slate-800">Review &amp; Respond</h2>
               <span className="text-xs text-slate-400 font-medium">{queueIndex + 1} / {reviewQueue.length}</span>
             </div>
-            <div className="bg-slate-50 rounded-xl px-4 py-3 space-y-1 max-h-[36dvh] overflow-y-auto overscroll-contain">
+            <div className="bg-slate-50 rounded-xl px-4 py-3 space-y-1 flex-1 min-h-[120px] max-h-[36dvh] overflow-y-auto overscroll-contain">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-800">{reviewQueue[queueIndex].reviewer?.displayName ?? "Anonymous"}</span>
                 <Stars rating={reviewQueue[queueIndex].starRating} />
@@ -563,6 +617,48 @@ export default function ReviewsPage() {
                       />
                     </a>
                   ))}
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-slate-700">Review-specific prompt</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Applies only to this review.</p>
+                </div>
+                <button
+                  onClick={() => setShowReviewCustomPrompt((value) => !value)}
+                  disabled={generatingReply}
+                  className="text-xs font-semibold text-sky-600 hover:text-sky-700 disabled:text-slate-300 px-3 py-1.5 rounded-lg hover:bg-sky-50 disabled:hover:bg-transparent transition-colors"
+                >
+                  {showReviewCustomPrompt ? "Hide" : "Custom"}
+                </button>
+              </div>
+              {showReviewCustomPrompt && (
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    value={reviewCustomPromptDraft}
+                    onChange={(e) => setReviewCustomPromptDraft(e.target.value)}
+                    rows={3}
+                    placeholder="Example: Mention their product concern and keep the reply extra concise."
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setReviewCustomPromptDraft("")}
+                      disabled={!reviewCustomPromptDraft || generatingReply}
+                      className="text-xs font-medium text-slate-500 hover:text-slate-700 disabled:text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-100 disabled:hover:bg-transparent transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={generateWithReviewCustomPrompt}
+                      disabled={!reviewCustomPromptDraft.trim() || generatingReply}
+                      className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors"
+                    >
+                      {generatingReply ? "Generating..." : "Regenerate"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -601,7 +697,7 @@ export default function ReviewsPage() {
             </div>
             {postError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 shrink-0">{postError}</p>}
             <div className="flex items-center justify-between shrink-0">
-              <button onClick={() => { setReviewModalOpen(false); setSelected(new Set()); loadReviews(); }} className="text-xs text-slate-400 hover:text-slate-600">Cancel all</button>
+              <button onClick={() => { setReviewModalOpen(false); setSelected(new Set()); setShowReviewCustomPrompt(false); setReviewCustomPromptDraft(""); loadReviews(); }} className="text-xs text-slate-400 hover:text-slate-600">Cancel all</button>
               <div className="flex gap-2">
                 <button onClick={skipCurrentReply} disabled={generatingReply || postingReply} className="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 px-4 py-1.5 rounded-lg transition-colors">Skip</button>
                 <button onClick={postCurrentReply} disabled={generatingReply || postingReply || !currentReply || serviceUnavailable} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-1.5 rounded-lg transition-colors">{postingReply ? "Posting…" : "Post Reply"}</button>

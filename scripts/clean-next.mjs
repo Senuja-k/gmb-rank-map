@@ -14,11 +14,11 @@ function hasRunningDevServer() {
   if (process.platform !== "win32") return false;
 
   try {
+    const escapedRoot = root.replaceAll("'", "''");
     const command = [
-      "$root = $args[0];",
+      `$root = '${escapedRoot}';`,
       "Get-CimInstance Win32_Process -Filter \"name = 'node.exe'\" |",
       "Where-Object {",
-      "  $_.ProcessId -ne $PID -and",
       "  $_.CommandLine -like \"*$root*\" -and",
       "  ($_.CommandLine -like \"*run dev*\" -or $_.CommandLine -like \"*next*dev*\")",
       "} |",
@@ -26,7 +26,7 @@ function hasRunningDevServer() {
     ].join(" ");
 
     return Boolean(
-      execFileSync("powershell.exe", ["-NoProfile", "-Command", command, root], {
+      execFileSync("powershell.exe", ["-NoProfile", "-Command", command], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
       }).trim()

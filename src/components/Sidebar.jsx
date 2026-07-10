@@ -327,6 +327,36 @@ export default function Sidebar() {
                       Key {activeKeyIndex + 1} limit reached
                     </div>
                   )}
+                  {(() => {
+                    const searchBudget = budgets[0];
+                    if (!searchBudget?.geminiSearchGroundingLimit) return null;
+                    const used = searchBudget.geminiSearchGroundingPrompts ?? 0;
+                    const limit = searchBudget.geminiSearchGroundingLimit;
+                    const pct = Math.min(100, (used / limit) * 100);
+                    const color = pct > 90 ? "#ef4444" : pct > 70 ? "#f59e0b" : "#22c55e";
+                    return (
+                      <div className="pt-2 mt-2 border-t border-white/6">
+                        <div className="flex justify-between items-baseline mb-1">
+                          <span className="text-[10px] text-slate-500">Gemini Search</span>
+                          <span className="text-[10px] text-slate-600 tabular-nums">
+                            {used.toLocaleString()}<span className="text-slate-700">/{limit.toLocaleString()}</span>
+                          </span>
+                        </div>
+                        <div className="w-full h-1 rounded-full bg-white/6 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${pct}%`, background: color }}
+                          />
+                        </div>
+                        {searchBudget.geminiSearchGroundingBlocked && (
+                          <div className="flex items-center gap-1.5 text-[10px] font-medium text-red-400 mt-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse shrink-0" />
+                            Search grounding limit reached
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </>
               );
             })()}

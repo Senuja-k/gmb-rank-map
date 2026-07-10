@@ -27,7 +27,8 @@ create index if not exists scans_created_at_idx on scans (created_at desc);
 create table if not exists budget (
   month               text primary key,       -- e.g. "2026-04"
   text_search_calls   integer not null default 0,
-  nearby_search_calls integer not null default 0
+  nearby_search_calls integer not null default 0,
+  gemini_search_grounding_prompts integer not null default 0
 );
 
 -- 3. Enable Row Level Security (tables are open via anon key for now)

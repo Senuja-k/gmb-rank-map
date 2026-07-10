@@ -3,7 +3,9 @@ import { createAdminClient } from "./supabase-server";
 // ── Config ──────────────────────────────────────────────────────────────────
 const FREE_TEXT_SEARCH_PRO = 5000;
 const FREE_NEARBY_SEARCH_PRO = 5000;
+export const FREE_GEMINI_SEARCH_GROUNDING_PROMPTS = 5000;
 const COST_PER_REQUEST = 0.032;
+const GEMINI_SEARCH_GROUNDING_OVERAGE_PER_1000 = 14;
 export const API_KEY_COUNT = 2;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -26,29 +28,44 @@ async function loadBudget(apiKeyIndex = 0) {
   if (error) throw new Error(`loadBudget: ${error.message}`);
   if (data) return data;
   // First call this month for this key — insert a fresh row
-  const fresh = { month, api_key_index: apiKeyIndex, text_search_calls: 0, nearby_search_calls: 0 };
+  const fresh = {
+    month,
+    api_key_index: apiKeyIndex,
+    text_search_calls: 0,
+    nearby_search_calls: 0,
+    gemini_search_grounding_prompts: 0,
+  };
   const { error: insErr } = await supabase.from("budget").insert(fresh);
   if (insErr) throw new Error(`loadBudget insert: ${insErr.message}`);
   return fresh;
 }
 
 function formatKeyStatus(data) {
-  const textRemaining = FREE_TEXT_SEARCH_PRO - data.text_search_calls;
-  const nearbyRemaining = FREE_NEARBY_SEARCH_PRO - data.nearby_search_calls;
+  const textSearchCalls = data.text_search_calls ?? 0;
+  const nearbySearchCalls = data.nearby_search_calls ?? 0;
+  const geminiSearchGroundingPrompts = data.gemini_search_grounding_prompts ?? 0;
+  const textRemaining = FREE_TEXT_SEARCH_PRO - textSearchCalls;
+  const nearbyRemaining = FREE_NEARBY_SEARCH_PRO - nearbySearchCalls;
+  const geminiSearchGroundingRemaining = FREE_GEMINI_SEARCH_GROUNDING_PROMPTS - geminiSearchGroundingPrompts;
   const totalRemaining = textRemaining + nearbyRemaining;
   return {
     month: data.month,
     apiKeyIndex: data.api_key_index,
-    textSearchCalls: data.text_search_calls,
+    textSearchCalls,
     textSearchLimit: FREE_TEXT_SEARCH_PRO,
     textSearchRemaining: Math.max(0, textRemaining),
-    nearbySearchCalls: data.nearby_search_calls,
+    nearbySearchCalls,
     nearbySearchLimit: FREE_NEARBY_SEARCH_PRO,
     nearbySearchRemaining: Math.max(0, nearbyRemaining),
-    totalCalls: data.text_search_calls + data.nearby_search_calls,
+    totalCalls: textSearchCalls + nearbySearchCalls,
     totalFreeLimit: FREE_TEXT_SEARCH_PRO + FREE_NEARBY_SEARCH_PRO,
     totalRemaining: Math.max(0, totalRemaining),
     costPerRequest: COST_PER_REQUEST,
+    geminiSearchGroundingPrompts,
+    geminiSearchGroundingLimit: FREE_GEMINI_SEARCH_GROUNDING_PROMPTS,
+    geminiSearchGroundingRemaining: Math.max(0, geminiSearchGroundingRemaining),
+    geminiSearchGroundingOveragePer1000: GEMINI_SEARCH_GROUNDING_OVERAGE_PER_1000,
+    geminiSearchGroundingBlocked: geminiSearchGroundingRemaining <= 0,
     blocked: totalRemaining <= 0,
   };
 }
@@ -93,4 +110,41 @@ export async function recordSpend(callsMade, usesTextSearch, apiKeyIndex = 0) {
     .eq("month", data.month)
     .eq("api_key_index", apiKeyIndex);
   if (error) throw new Error(`recordSpend: ${error.message}`);
+}
+
+export async function getGeminiSearchGroundingStatus() {
+  const data = await loadBudget(0);
+  const status = formatKeyStatus(data);
+  return {
+    month: status.month,
+    prompts: status.geminiSearchGroundingPrompts,
+    limit: status.geminiSearchGroundingLimit,
+    remaining: status.geminiSearchGroundingRemaining,
+    overagePer1000: status.geminiSearchGroundingOveragePer1000,
+    blocked: status.geminiSearchGroundingBlocked,
+  };
+}
+
+export async function canAffordGeminiSearchGrounding(prompts = 1) {
+  const status = await getGeminiSearchGroundingStatus();
+  return {
+    allowed: prompts <= status.remaining,
+    estimatedPrompts: prompts,
+    remaining: status.remaining,
+    limit: status.limit,
+    status,
+  };
+}
+
+export async function recordGeminiSearchGrounding(prompts = 1) {
+  const supabase = createAdminClient();
+  const data = await loadBudget(0);
+  const newVal = (data.gemini_search_grounding_prompts ?? 0) + prompts;
+  const { error } = await supabase
+    .from("budget")
+    .update({ gemini_search_grounding_prompts: newVal })
+    .eq("month", data.month)
+    .eq("api_key_index", 0);
+  if (error) throw new Error(`recordGeminiSearchGrounding: ${error.message}`);
+  return getGeminiSearchGroundingStatus();
 }

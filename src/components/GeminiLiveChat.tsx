@@ -8,6 +8,13 @@ interface ChatMessage {
   text: string;
 }
 
+interface SearchBudget {
+  prompts: number;
+  limit: number;
+  remaining: number;
+  blocked: boolean;
+}
+
 type ChatStatus = 'idle' | 'ready' | 'thinking' | 'error';
 
 const MODEL_USAGE_KEY = 'gbp_model_usage';
@@ -47,6 +54,7 @@ export default function GeminiLiveChat() {
   const [inputText, setInputText] = useState('');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [dailyUsage, setDailyUsage] = useState(() => getUsageToday());
+  const [searchBudget, setSearchBudget] = useState<SearchBudget | null>(null);
   const [status, setStatus] = useState<ChatStatus>('idle');
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -73,6 +81,7 @@ export default function GeminiLiveChat() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (data.searchBudget) setSearchBudget(data.searchBudget);
         if (res.status === 401) {
           window.location.href = '/login';
           throw new Error('Please sign in again to use the assistant.');
@@ -80,6 +89,7 @@ export default function GeminiLiveChat() {
         throw new Error(data.error || `Assistant request failed (${res.status})`);
       }
 
+      if (data.searchBudget) setSearchBudget(data.searchBudget);
       setMessages((prev) => [
         ...prev,
         {
@@ -248,6 +258,13 @@ export default function GeminiLiveChat() {
                     Daily Usage: <b className="text-slate-600">{dailyUsage} / {MAX_RPD}</b>
                   </span>
                   <span>Status: {statusLabel}</span>
+                  {searchBudget && (
+                    <span>
+                      Search: <b className={searchBudget.blocked ? 'text-rose-500' : 'text-slate-600'}>
+                        {searchBudget.remaining.toLocaleString()} / {searchBudget.limit.toLocaleString()} left
+                      </b>
+                    </span>
+                  )}
                 </div>
                 <span className="italic">3.1 Flash-Lite</span>
               </div>
