@@ -766,7 +766,7 @@ export default function PostsPage() {
             <textarea
               value={globalContent}
               onChange={(e) => setGlobalContent(e.target.value)}
-              placeholder="Post body text… (max 300 characters recommended)"
+              placeholder="Post body text…"
               rows={4}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
             />
@@ -1069,4 +1069,3 @@ export default function PostsPage() {
     </div>
   );
 }
-

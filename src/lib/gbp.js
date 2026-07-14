@@ -253,7 +253,7 @@ export async function generatePostContentFromImage(imageBase64, mimeType, postTy
     `${baseInstruction}\n\n` +
     `Return ONLY valid JSON (no markdown fences) with exactly two keys:\n` +
     `- "title": Short catchy title, max 10 words.\n` +
-    `- "content": Post body, max 280 characters.`;
+    `- "content": Post body. Follow the requested depth and structure from the instruction above.`;
 
   const result = await model.generateContent([
     prompt,
@@ -270,7 +270,7 @@ export async function generatePostContentFromImage(imageBase64, mimeType, postTy
     const contentMatch = raw.match(/"content"\s*:\s*"([^"]+)"/);
     return {
       title: titleMatch?.[1] ?? "New at Our Showroom",
-      content: contentMatch?.[1] ?? raw.slice(0, 280),
+      content: contentMatch?.[1] ?? raw,
     };
   }
 }
