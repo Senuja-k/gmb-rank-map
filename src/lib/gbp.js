@@ -155,6 +155,8 @@ export async function handleReviewReply(
 
 // ── 2. Automated Post Creator ─────────────────────────────────────────────────
 
+export const GBP_POST_SUMMARY_MAX_CHARS = 1500;
+
 export async function createGbpPost(
   email,
   locationName,
@@ -167,16 +169,30 @@ export async function createGbpPost(
   ctaActionType = "LEARN_MORE"
 ) {
   const auth = await getAuthClientByEmail(email);
+  const needsCtaUrl = topicType !== "OFFER" && ctaActionType !== "NONE" && ctaActionType !== "CALL";
+  if (needsCtaUrl && !isValidPublicUrl(ctaUrl)) {
+    throw new Error(`A valid public Button URL is required for ${ctaActionType}.`);
+  }
+
+  const normalizedSummary = String(summaryText ?? "").trim();
+  if (!normalizedSummary) {
+    throw new Error("Post content is empty.");
+  }
+  if (normalizedSummary.length > GBP_POST_SUMMARY_MAX_CHARS) {
+    throw new Error(
+      `Google Business Profile post descriptions must be ${GBP_POST_SUMMARY_MAX_CHARS.toLocaleString()} characters or fewer. Current length: ${normalizedSummary.length.toLocaleString()}.`
+    );
+  }
 
   const requestBody = {
     languageCode: "en-US",
-    summary: summaryText,
+    summary: normalizedSummary,
     topicType,
     ...(topicType !== "OFFER" && ctaActionType !== "NONE" && {
       callToAction: {
         actionType: ctaActionType,
         ...(ctaActionType !== "CALL" && {
-          url: ctaUrl || process.env.NEXT_PUBLIC_SITE_URL || "https://yourwebsite.com",
+          url: ctaUrl,
         }),
       },
     }),
@@ -210,6 +226,15 @@ export async function createGbpPost(
   });
 
   return response.data;
+}
+
+function isValidPublicUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 /** Fetch all published local posts for a single location. */
@@ -253,7 +278,7 @@ export async function generatePostContentFromImage(imageBase64, mimeType, postTy
     `${baseInstruction}\n\n` +
     `Return ONLY valid JSON (no markdown fences) with exactly two keys:\n` +
     `- "title": Short catchy title, max 10 words.\n` +
-    `- "content": Post body. Follow the requested depth and structure from the instruction above.`;
+    `- "content": Post body. Follow the requested depth and structure from the instruction above, but keep the total Google Business Profile post description within ${GBP_POST_SUMMARY_MAX_CHARS} characters.`;
 
   const result = await model.generateContent([
     prompt,

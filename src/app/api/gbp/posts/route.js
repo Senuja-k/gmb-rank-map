@@ -21,6 +21,37 @@ import { NextResponse } from "next/server";
 import { generateAndPublishPost, createGbpPost, fetchPostsForLocation } from "@/lib/gbp";
 import { createAdminClient } from "@/lib/supabase-server";
 
+function extractGooglePostError(err) {
+  const apiError = err.response?.data?.error ?? err.cause ?? err;
+  const detailGroups = [
+    err.response?.data?.error?.details,
+    err.cause?.details,
+    apiError?.details,
+  ].filter(Array.isArray);
+
+  const fieldViolations = detailGroups.flatMap((details) =>
+    details.flatMap((detail) => detail.fieldViolations ?? detail.violations ?? [])
+  );
+  if (fieldViolations.length) {
+    return fieldViolations
+      .map((violation) => {
+        const field = violation.field ?? violation.subject ?? "field";
+        const description = violation.description ?? violation.message ?? JSON.stringify(violation);
+        return `${field}: ${description}`;
+      })
+      .join("; ");
+  }
+
+  const errors = [err.response?.data?.error?.errors, err.cause?.errors, apiError?.errors].find(Array.isArray);
+  if (errors?.length) {
+    return errors
+      .map((item) => item.message ?? item.reason ?? JSON.stringify(item))
+      .join("; ");
+  }
+
+  return apiError?.message ?? err.message ?? "Publish failed.";
+}
+
 /**
  * GET /api/gbp/posts
  * Returns published posts from all saved+enabled GBP locations.
@@ -139,6 +170,6 @@ export async function POST(request) {
     return NextResponse.json({ apiResponse });
   } catch (err) {
     console.error("[GBP posts]", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: extractGooglePostError(err) }, { status: 500 });
   }
 }

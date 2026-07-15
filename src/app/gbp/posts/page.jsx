@@ -15,6 +15,7 @@ const GEMINI_MODELS = [
   { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite · low-cost",   rpd: 20,  rpm: 10 },
 ];
 const DEFAULT_MODEL = GEMINI_MODELS[0].id;
+const GBP_POST_SUMMARY_MAX_CHARS = 1500;
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function loadRawUsage() {
@@ -48,6 +49,22 @@ const CTA_BUTTONS = [
   { key: "SIGN_UP", label: "Sign up" },
   { key: "CALL", label: "Call now" },
 ];
+
+function isValidPublicUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function buildPostSummary(postType, title, content) {
+  if (postType === "EVENT" || postType === "OFFER") {
+    return content ?? "";
+  }
+  return title ? `${title}\n\n${content ?? ""}` : (content ?? "");
+}
 
 function UploadIcon() {
   return (
@@ -396,21 +413,23 @@ export default function PostsPage() {
 
         const title = sameContent ? globalTitle : (perLoc[loc.location_name]?.title ?? "");
         const content = sameContent ? globalContent : (perLoc[loc.location_name]?.content ?? "");
-
-        let summary;
-        if (postType === "EVENT" || postType === "OFFER") {
-          summary = content;
-        } else {
-          summary = title ? `${title}\n\n${content}` : content;
-        }
+        const summary = buildPostSummary(postType, title, content);
 
         if (!summary.trim()) throw new Error("Post content is empty. Please add a description or generate from image.");
+        if (summary.trim().length > GBP_POST_SUMMARY_MAX_CHARS) {
+          throw new Error(
+            `Post description is ${summary.trim().length.toLocaleString()} characters. Google Business Profile accepts ${GBP_POST_SUMMARY_MAX_CHARS.toLocaleString()} characters or fewer.`
+          );
+        }
 
         const apiTopicType = postType === "UPDATE" ? "STANDARD" : postType;
 
         const resolvedCta = ctaMode === "common" ? commonCtaUrl : (loc.cta_url ?? "");
 
         const needsCtaUrl = postType !== "OFFER" && ctaActionType !== "NONE" && ctaActionType !== "CALL";
+        if (needsCtaUrl && !isValidPublicUrl(resolvedCta)) {
+          throw new Error(`A valid Button URL is required for ${ctaActionType}.`);
+        }
 
         const body = {
           email: loc.google_email,
@@ -457,6 +476,8 @@ export default function PostsPage() {
 
   const selectedCount = selectedLocs.size;
   const anyGenerating = Object.values(perLoc).some((d) => d.generating);
+  const globalSummaryLength = buildPostSummary(postType, globalTitle, globalContent).trim().length;
+  const globalSummaryTooLong = globalSummaryLength > GBP_POST_SUMMARY_MAX_CHARS;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 space-y-7">
@@ -770,7 +791,9 @@ export default function PostsPage() {
               rows={4}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
             />
-            <p className="text-[10px] text-slate-400 mt-0.5 text-right">{globalContent.length} chars</p>
+            <p className={`text-[10px] mt-0.5 text-right ${globalSummaryTooLong ? "text-red-500 font-medium" : "text-slate-400"}`}>
+              {globalSummaryLength.toLocaleString()} / {GBP_POST_SUMMARY_MAX_CHARS.toLocaleString()} chars
+            </p>
           </div>
         </div>
       )}
@@ -796,6 +819,8 @@ export default function PostsPage() {
             const isSelected = selectedLocs.has(loc.location_name);
             const locData = perLoc[loc.location_name] ?? {};
             const hasImage = !!locData.imageData?.base64;
+            const locSummaryLength = buildPostSummary(postType, locData.title ?? "", locData.content ?? "").trim().length;
+            const locSummaryTooLong = locSummaryLength > GBP_POST_SUMMARY_MAX_CHARS;
 
             return (
               <div
@@ -871,7 +896,9 @@ export default function PostsPage() {
                             rows={3}
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
                           />
-                          <p className="text-[10px] text-slate-400 mt-0.5 text-right">{(locData.content ?? "").length} chars</p>
+                          <p className={`text-[10px] mt-0.5 text-right ${locSummaryTooLong ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                            {locSummaryLength.toLocaleString()} / {GBP_POST_SUMMARY_MAX_CHARS.toLocaleString()} chars
+                          </p>
                         </div>
                       </div>
                     )}
