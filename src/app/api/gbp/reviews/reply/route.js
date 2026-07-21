@@ -7,7 +7,7 @@
  *   "locationName": "accounts/123456789/locations/987654321",
  *   "reviewId":     "accounts/123456789/locations/987654321/reviews/AbCdEf",
  *   "reviewerName": "Jane Doe",
- *   "reviewText":   "Great selection of skincare!"
+ *   "reviewText":   "Great selection of skincare!" // may be blank for rating-only reviews
  * }
  *
  * Returns:
@@ -26,13 +26,13 @@ export async function POST(request) {
   }
 
   const { email, locationName, reviewId, reviewerName, reviewText, customInstruction, reviewPhotos, geminiModel, starRating } = body;
+  const safeReviewText = typeof reviewText === "string" ? reviewText : "";
 
-  if (!email || !locationName || !reviewId || !reviewerName || !reviewText || starRating === undefined || starRating === null) {
-    // Added starRating to the validation check
+  if (!email || !locationName || !reviewId || !reviewerName || starRating === undefined || starRating === null) {
     return NextResponse.json(
       {
         error:
-          "Required fields: email, locationName, reviewId, reviewerName, reviewText.",
+          "Required fields: email, locationName, reviewId, reviewerName, starRating.",
       },
       { status: 400 }
     );
@@ -44,11 +44,11 @@ export async function POST(request) {
       locationName,
       reviewId,
       reviewerName,
-      reviewText,
+      safeReviewText,
       customInstruction,
       Array.isArray(reviewPhotos) ? reviewPhotos : [],
       geminiModel,
-      starRating // Added starRating to the function call
+      starRating
     );
     return NextResponse.json(result);
   } catch (err) {
