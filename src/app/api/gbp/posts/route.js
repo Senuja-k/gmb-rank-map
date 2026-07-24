@@ -11,6 +11,7 @@
  *   topicType?,           // "STANDARD" | "OFFER" | "EVENT" (default STANDARD)
  *   eventData?,           // { title, startDate: {year,month,day}, endDate: {year,month,day} }
  *   offerData?,           // { couponCode?, redeemUrl?, terms? }
+ *   scheduledTime?,       // optional ISO/RFC3339 timestamp for scheduled publishing
  *   // Legacy mode support:
  *   mode?,                // "generate" uses Gemini from topic field
  *   topic?,               // used when mode = "generate"
@@ -18,7 +19,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { generateAndPublishPost, createGbpPost, fetchPostsForLocation } from "@/lib/gbp";
+import { generateAndPublishPost, createGbpPost, fetchPostsForLocation, updateGbpPost, deleteGbpPost } from "@/lib/gbp";
 import { createAdminClient } from "@/lib/supabase-server";
 
 function extractGooglePostError(err) {
@@ -50,6 +51,18 @@ function extractGooglePostError(err) {
   }
 
   return apiError?.message ?? err.message ?? "Publish failed.";
+}
+
+function normalizeFutureScheduledTime(scheduledTime) {
+  if (!scheduledTime) return null;
+  const parsedScheduledTime = new Date(scheduledTime);
+  if (Number.isNaN(parsedScheduledTime.getTime())) {
+    throw new Error("Field 'scheduledTime' must be a valid ISO date-time.");
+  }
+  if (parsedScheduledTime.getTime() <= Date.now()) {
+    throw new Error("Scheduled time must be in the future.");
+  }
+  return parsedScheduledTime.toISOString();
 }
 
 /**
@@ -118,6 +131,7 @@ export async function POST(request) {
     topicType = "STANDARD",
     eventData = null,
     offerData = null,
+    scheduledTime = null,
     topic,
   } = body;
 
@@ -156,6 +170,13 @@ export async function POST(request) {
       );
     }
 
+    let normalizedScheduledTime = null;
+    try {
+      normalizedScheduledTime = normalizeFutureScheduledTime(scheduledTime);
+    } catch (err) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+
     const apiResponse = await createGbpPost(
       email,
       fullLocationPath,
@@ -165,11 +186,96 @@ export async function POST(request) {
       topicType,
       eventData,
       offerData,
-      ctaActionType
+      ctaActionType,
+      normalizedScheduledTime
     );
     return NextResponse.json({ apiResponse });
   } catch (err) {
     console.error("[GBP posts]", err);
+    return NextResponse.json({ error: extractGooglePostError(err) }, { status: 500 });
+  }
+}
+
+export async function PATCH(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const { email, name, summaryText, scheduledTime, eventTitle } = body;
+  if (!email || !name) {
+    return NextResponse.json(
+      { error: "Required fields: email, name." },
+      { status: 400 }
+    );
+  }
+
+  const updates = {};
+  const updateMask = [];
+
+  if (typeof summaryText === "string") {
+    const normalizedSummary = summaryText.trim();
+    if (!normalizedSummary) {
+      return NextResponse.json({ error: "Post content is empty." }, { status: 400 });
+    }
+    updates.summary = normalizedSummary;
+    updateMask.push("summary");
+  }
+
+  if (scheduledTime) {
+    try {
+      updates.scheduledTime = normalizeFutureScheduledTime(scheduledTime);
+    } catch (err) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    updateMask.push("scheduledTime");
+  }
+
+  if (typeof eventTitle === "string") {
+    const normalizedTitle = eventTitle.trim();
+    if (!normalizedTitle) {
+      return NextResponse.json({ error: "Post title is empty." }, { status: 400 });
+    }
+    updates.event = { title: normalizedTitle };
+    updateMask.push("event.title");
+  }
+
+  if (!updateMask.length) {
+    return NextResponse.json({ error: "No editable fields were provided." }, { status: 400 });
+  }
+
+  try {
+    const apiResponse = await updateGbpPost(email, name, updates, updateMask.join(","));
+    return NextResponse.json({ apiResponse });
+  } catch (err) {
+    console.error("[GBP posts update]", err);
+    return NextResponse.json({ error: extractGooglePostError(err) }, { status: 500 });
+  }
+}
+
+export async function DELETE(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const { email, name } = body;
+  if (!email || !name) {
+    return NextResponse.json(
+      { error: "Required fields: email, name." },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const apiResponse = await deleteGbpPost(email, name);
+    return NextResponse.json({ apiResponse });
+  } catch (err) {
+    console.error("[GBP posts delete]", err);
     return NextResponse.json({ error: extractGooglePostError(err) }, { status: 500 });
   }
 }

@@ -60,6 +60,15 @@ const navItems = [
         ),
       },
       {
+        label: "Scheduled Posts",
+        href: "/gbp/scheduled-posts",
+        icon: (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3M5 11h14m-14 8h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2zm7-5l2 2 4-4" />
+          </svg>
+        ),
+      },
+      {
         label: "Performance",
         href: "/gbp/performance",
         icon: (

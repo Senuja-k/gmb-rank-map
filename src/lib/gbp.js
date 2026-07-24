@@ -166,7 +166,8 @@ export async function createGbpPost(
   topicType = "STANDARD",
   eventData = null,
   offerData = null,
-  ctaActionType = "LEARN_MORE"
+  ctaActionType = "LEARN_MORE",
+  scheduledTime = null
 ) {
   const auth = await getAuthClientByEmail(email);
   const needsCtaUrl = topicType !== "OFFER" && ctaActionType !== "NONE" && ctaActionType !== "CALL";
@@ -197,6 +198,7 @@ export async function createGbpPost(
       },
     }),
     ...(imageUrl && { media: [{ mediaFormat: "PHOTO", sourceUrl: imageUrl }] }),
+    ...(scheduledTime && { scheduledTime }),
   };
 
   if ((topicType === "EVENT" || topicType === "OFFER") && eventData) {
@@ -257,6 +259,28 @@ export async function fetchPostsForLocation(email, locationName) {
   } while (pageToken);
 
   return posts;
+}
+
+export async function updateGbpPost(email, postName, updates, updateMask) {
+  const auth = await getAuthClientByEmail(email);
+  const response = await auth.request({
+    url: `https://mybusiness.googleapis.com/v4/${postName}?updateMask=${encodeURIComponent(updateMask)}`,
+    method: "PATCH",
+    data: {
+      name: postName,
+      ...updates,
+    },
+  });
+  return response.data;
+}
+
+export async function deleteGbpPost(email, postName) {
+  const auth = await getAuthClientByEmail(email);
+  const response = await auth.request({
+    url: `https://mybusiness.googleapis.com/v4/${postName}`,
+    method: "DELETE",
+  });
+  return response.data;
 }
 
 const DEFAULT_POST_PROMPT =

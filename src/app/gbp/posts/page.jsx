@@ -66,6 +66,26 @@ function buildPostSummary(postType, title, content) {
   return title ? `${title}\n\n${content ?? ""}` : (content ?? "");
 }
 
+function buildScheduledTimeIso(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null;
+  const scheduledDate = new Date(`${dateStr}T${timeStr}:00`);
+  if (Number.isNaN(scheduledDate.getTime())) return null;
+  return scheduledDate.toISOString();
+}
+
+function formatScheduledTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return "";
+  const scheduledDate = new Date(`${dateStr}T${timeStr}:00`);
+  if (Number.isNaN(scheduledDate.getTime())) return "";
+  return scheduledDate.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function UploadIcon() {
   return (
     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -199,6 +219,9 @@ export default function PostsPage() {
 
   const [publishing, setPublishing] = useState(false);
   const [publishResults, setPublishResults] = useState(null);
+  const [publishMode, setPublishMode] = useState("now");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [scheduledTime, setScheduledTime] = useState("");
 
   const [geminiModel, setGeminiModel] = useState(DEFAULT_MODEL);
   const [modelUsage, setModelUsage] = useState({});
@@ -402,6 +425,22 @@ export default function PostsPage() {
     const locsToPublish = locations.filter((l) => selectedLocs.has(l.location_name));
     if (!locsToPublish.length) return;
 
+    const scheduledTimeIso = publishMode === "schedule" ? buildScheduledTimeIso(scheduledDate, scheduledTime) : null;
+    if (publishMode === "schedule") {
+      if (!scheduledTimeIso) {
+        setPublishResults({
+          _scheduler: { success: false, error: "Choose a valid schedule date and time." },
+        });
+        return;
+      }
+      if (new Date(scheduledTimeIso).getTime() <= Date.now()) {
+        setPublishResults({
+          _scheduler: { success: false, error: "Scheduled time must be in the future." },
+        });
+        return;
+      }
+    }
+
     setPublishing(true);
     setPublishResults(null);
 
@@ -439,6 +478,7 @@ export default function PostsPage() {
           ctaUrl: needsCtaUrl ? resolvedCta : "",
           ctaActionType: postType !== "OFFER" ? ctaActionType : "NONE",
           topicType: apiTopicType,
+          scheduledTime: scheduledTimeIso,
           ...((postType === "EVENT" || postType === "OFFER") && {
             eventData: {
               title: eventTitle,
@@ -464,7 +504,11 @@ export default function PostsPage() {
         const respData = await res.json();
         if (!res.ok) throw new Error(respData.error ?? "Publish failed");
 
-        results[loc.location_name] = { success: true };
+        results[loc.location_name] = {
+          success: true,
+          scheduled: publishMode === "schedule",
+          scheduledLabel: publishMode === "schedule" ? formatScheduledTime(scheduledDate, scheduledTime) : "",
+        };
       } catch (err) {
         results[loc.location_name] = { success: false, error: err.message };
       }
@@ -478,6 +522,9 @@ export default function PostsPage() {
   const anyGenerating = Object.values(perLoc).some((d) => d.generating);
   const globalSummaryLength = buildPostSummary(postType, globalTitle, globalContent).trim().length;
   const globalSummaryTooLong = globalSummaryLength > GBP_POST_SUMMARY_MAX_CHARS;
+  const publishActionLabel = publishMode === "schedule" ? "Schedule" : "Publish";
+  const publishProgressLabel = publishMode === "schedule" ? "Scheduling" : "Publishing";
+  const scheduledLabel = formatScheduledTime(scheduledDate, scheduledTime);
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 space-y-7">
@@ -739,6 +786,55 @@ export default function PostsPage() {
         )}
       </div>
 
+      {/* Scheduler */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">Publish Time</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Send the post immediately or schedule it on Google Business Profile.</p>
+        </div>
+        <div className="flex gap-2">
+          {[
+            { key: "now", label: "Publish now" },
+            { key: "schedule", label: "Schedule" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setPublishMode(key)}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                publishMode === key
+                  ? "bg-sky-500 text-white border-sky-500"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-sky-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {publishMode === "schedule" && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Schedule Date*</label>
+              <input
+                type="date"
+                value={scheduledDate}
+                min={todayStr()}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Schedule Time*</label>
+              <TimeSelect value={scheduledTime} onChange={setScheduledTime} placeholder="Choose time" />
+            </div>
+            {scheduledLabel && (
+              <p className="col-span-2 text-[11px] text-slate-400 bg-slate-50 rounded-lg px-3 py-2">
+                Scheduled for {scheduledLabel}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Content mode toggle */}
       <div className="flex items-center justify-between bg-white border border-slate-200 rounded-2xl px-5 py-4">
         <div>
@@ -917,14 +1013,24 @@ export default function PostsPage() {
           disabled={publishing || selectedCount === 0}
           className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white font-semibold py-3 rounded-xl text-sm transition-colors"
         >
-          {publishing ? "Publishing…" : `Publish to ${selectedCount} location${selectedCount !== 1 ? "s" : ""}`}
+          {publishing ? `${publishProgressLabel}…` : `${publishActionLabel} to ${selectedCount} location${selectedCount !== 1 ? "s" : ""}`}
         </button>
       )}
 
       {/* Results */}
       {publishResults && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-slate-700">Publish Results</h2>
+          <h2 className="text-sm font-semibold text-slate-700">{publishMode === "schedule" ? "Schedule Results" : "Publish Results"}</h2>
+          {publishResults._scheduler && (
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 mt-0.5 w-4 h-4 rounded-full bg-red-100 flex items-center justify-center">
+                <svg className="w-2.5 h-2.5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </span>
+              <p className="text-xs text-red-600">{publishResults._scheduler.error}</p>
+            </div>
+          )}
           {locations.filter((l) => publishResults[l.location_name]).map((loc) => {
             const res = publishResults[loc.location_name];
             return (
@@ -944,6 +1050,9 @@ export default function PostsPage() {
                 )}
                 <div>
                   <p className="text-xs font-medium text-slate-700">{loc.display_name}</p>
+                  {res.success && res.scheduled && (
+                    <p className="text-xs text-emerald-600 mt-0.5">Scheduled for {res.scheduledLabel}</p>
+                  )}
                   {!res.success && <p className="text-xs text-red-600 mt-0.5">{res.error}</p>}
                 </div>
               </div>
