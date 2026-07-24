@@ -24,33 +24,42 @@ export default function AdminUsersPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("user");
   const [error, setError] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
   const [loading, setLoading] = useState(true);
 
   const canManageElevated = me?.role === "super_admin";
   const allowedCreateRoles = useMemo(() => (canManageElevated ? roles : ["user"]), [canManageElevated]);
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    const [meRes, usersRes] = await Promise.all([fetch("/api/auth/me"), fetch("/api/admin/users")]);
-    if (meRes.status === 401 || usersRes.status === 401) {
-      router.push("/login");
-      return;
-    }
-    if (usersRes.status === 403) {
-      router.push("/");
-      return;
-    }
-    const meData = await readJsonOrError(meRes);
-    const usersData = await readJsonOrError(usersRes);
-    setMe(meData.profile);
-    setUsers(usersData.users ?? []);
-    setLoading(false);
-  }
-
   useEffect(() => {
-    load();
-  }, []);
+    let cancelled = false;
+
+    async function loadUsers() {
+      const [meRes, usersRes] = await Promise.all([fetch("/api/auth/me"), fetch("/api/admin/users")]);
+      if (cancelled) return;
+
+      if (meRes.status === 401 || usersRes.status === 401) {
+        router.push("/login");
+        return;
+      }
+      if (usersRes.status === 403) {
+        router.push("/");
+        return;
+      }
+      const meData = await readJsonOrError(meRes);
+      const usersData = await readJsonOrError(usersRes);
+      if (cancelled) return;
+
+      setMe(meData.profile);
+      setUsers(usersData.users ?? []);
+      setLoading(false);
+    }
+
+    loadUsers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function createUser(e) {
     e.preventDefault();
@@ -86,13 +95,37 @@ export default function AdminUsersPage() {
     setUsers((current) => current.map((user) => (user.id === id ? data.user : user)));
   }
 
+  async function copyLoginLink() {
+    const loginUrl = `${window.location.origin}/login`;
+    setCopyStatus("");
+
+    try {
+      await navigator.clipboard.writeText(loginUrl);
+      setCopyStatus("Login link copied.");
+    } catch {
+      setCopyStatus("Could not copy link.");
+    }
+  }
+
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading users...</div>;
 
   return (
     <div className="px-8 py-8 max-w-6xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[#1a2b4a]">User Management</h1>
-        <p className="text-sm text-slate-500 mt-1">Create users, manage roles, and disable access.</p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[#1a2b4a]">User Management</h1>
+          <p className="text-sm text-slate-500 mt-1">Create users, manage roles, and disable access.</p>
+        </div>
+        <div className="flex flex-col items-start gap-1 md:items-end">
+          <button
+            type="button"
+            onClick={copyLoginLink}
+            className="border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold px-4 py-2 rounded-lg text-sm"
+          >
+            Copy login link
+          </button>
+          {copyStatus && <p className="text-xs text-slate-500">{copyStatus}</p>}
+        </div>
       </div>
 
       <form onSubmit={createUser} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm grid gap-3 md:grid-cols-[1fr_1fr_180px_auto] items-end">

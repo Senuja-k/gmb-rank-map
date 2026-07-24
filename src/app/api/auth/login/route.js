@@ -28,6 +28,7 @@ export async function POST(req) {
     user: { id: data.user.id, email: data.user.email },
     session: data.session,
     profile,
+    mustChoosePassword: data.user.user_metadata?.must_choose_password === true,
   });
   setAuthCookies(response, data.session);
   return response;

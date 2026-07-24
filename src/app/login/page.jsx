@@ -19,8 +19,11 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [passwordChoiceRequired, setPasswordChoiceRequired] = useState(false);
+  const [passwordChoiceLoading, setPasswordChoiceLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -40,6 +43,12 @@ export default function LoginPage() {
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
       });
+
+      if (data.mustChoosePassword) {
+        setPasswordChoiceRequired(true);
+        return;
+      }
+
       router.push("/");
       router.refresh();
     } catch (err) {
@@ -49,9 +58,68 @@ export default function LoginPage() {
     }
   }
 
+  async function submitPasswordChoice(action) {
+    setPasswordChoiceLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/password-choice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, newPassword }),
+      });
+      const data = await readJsonOrError(res);
+      if (!res.ok) throw new Error(data.error ?? "Could not save password choice.");
+
+      router.push("/");
+      router.refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPasswordChoiceLoading(false);
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center px-6 bg-slate-100">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+      {passwordChoiceRequired ? (
+        <div className="w-full max-w-sm bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+          <div>
+            <h1 className="text-xl font-bold text-[#1a2b4a]">Password choice</h1>
+            <p className="text-sm text-slate-500 mt-1">You can keep the temporary password or set a new one now.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">New password</label>
+            <input
+              type="password"
+              minLength={8}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              disabled={passwordChoiceLoading}
+              onClick={() => submitPasswordChoice("keep")}
+              className="border border-slate-300 bg-white hover:bg-slate-50 disabled:bg-slate-100 text-slate-700 font-semibold py-2.5 rounded-lg text-sm transition-colors"
+            >
+              Keep password
+            </button>
+            <button
+              type="button"
+              disabled={passwordChoiceLoading}
+              onClick={() => submitPasswordChoice("change")}
+              className="bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
+            >
+              Change password
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="w-full max-w-sm bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
         <div>
           <h1 className="text-xl font-bold text-[#1a2b4a]">Sign in</h1>
           <p className="text-sm text-slate-500 mt-1">Use the account created by your admin.</p>
@@ -68,7 +136,8 @@ export default function LoginPage() {
         <button disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors">
           {loading ? "Signing in..." : "Sign in"}
         </button>
-      </form>
+        </form>
+      )}
     </div>
   );
 }

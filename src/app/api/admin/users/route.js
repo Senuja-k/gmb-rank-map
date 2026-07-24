@@ -35,6 +35,7 @@ export async function POST(req) {
       email,
       password,
       email_confirm: true,
+      user_metadata: { must_choose_password: true },
     });
     if (error || !data.user) {
       return NextResponse.json({ error: error?.message ?? "Could not create user." }, { status: 400 });
