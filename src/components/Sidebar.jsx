@@ -190,27 +190,27 @@ export default function Sidebar() {
       style={{ background: "linear-gradient(180deg, #0f1c33 0%, #1a2b4a 100%)" }}
     >
       {/* Brand */}
-      <div className="px-5 pt-6 pb-5">
-        <div className="flex items-center gap-3">
+      <div className="px-4 pt-5 pb-4">
+        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-            style={{ background: "linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)" }}
+            className="relative w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-950/30 ring-1 ring-white/20 shrink-0 overflow-hidden"
+            style={{ background: "linear-gradient(135deg, #4ade80 0%, #22d3ee 45%, #2563eb 100%)" }}
           >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="absolute inset-x-2 top-1 h-4 rounded-full bg-white/25 blur-sm" />
+            <svg className="relative w-5 h-5 text-white drop-shadow-sm" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          <div>
-            <h1 className="text-[13px] font-bold text-white leading-tight tracking-tight">GBP Manager</h1>
-            <p className="text-[10px] text-slate-500 mt-0.5 leading-none">Business Profile Suite</p>
+          <div className="min-w-0">
+            <h1 className="text-[14px] font-bold text-white leading-tight tracking-tight">GBP Manager</h1>
+            <p className="text-[10.5px] font-medium text-sky-100/65 mt-1 leading-none">Business Profile Suite</p>
           </div>
         </div>
       </div>
 
       {/* Divider */}
-      <div className="mx-4 h-px bg-white/6 mb-3" />
-
+      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-3" />
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 space-y-4 pb-4">
         {visibleNavItems.map((group) => (
@@ -260,7 +260,7 @@ export default function Sidebar() {
           <div className="mx-4 h-px bg-white/6" />
           <div className="px-4 py-3">
             <p className="text-[9px] text-red-400 font-medium">
-              ⚠ API Usage unavailable — run the Supabase migration
+              ? API Usage unavailable — run the Supabase migration
             </p>
           </div>
         </>
@@ -393,3 +393,6 @@ export default function Sidebar() {
     </aside>
   );
 }
+
+
+
