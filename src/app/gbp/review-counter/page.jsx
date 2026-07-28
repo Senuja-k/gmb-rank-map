@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 function toInputDate(date) {
@@ -42,6 +42,20 @@ function formatSavedAt(value) {
   });
 }
 
+function monthKey(value) {
+  return value?.slice(0, 7) ?? "";
+}
+
+function previousMonthKey(value) {
+  const date = startOfInputDate(`${monthKey(value)}-01`);
+  date.setMonth(date.getMonth() - 1);
+  return toInputDate(date).slice(0, 7);
+}
+
+function dateValue(value) {
+  return startOfInputDate(value).getTime();
+}
+
 function numberValue(value) {
   if (value === "" || value === null || value === undefined) return null;
   const parsed = Number(value);
@@ -56,15 +70,14 @@ function formatPercent(value) {
   return Number.isFinite(value) ? `${value.toFixed(1)}%` : "";
 }
 
+function formatRating(value) {
+  return Number.isFinite(value) ? value.toFixed(1) : "";
+}
+
 const MANUAL_ROWS = [
   "cosmeticsCustomers",
   "supplementCustomers",
-  "totalReviewsLastMonth",
-  "totalReviewsAsOfNow",
-  "manuallyCalculatedReviews",
-  "newReviewsCollected",
-  "customers",
-  "newCustomers",
+  "chatClicks",
 ];
 
 function emptyManualValues(locations) {
@@ -74,6 +87,35 @@ function emptyManualValues(locations) {
     for (const location of locations) values[row][location.location_name] = "";
   }
   return values;
+}
+
+function computedValuesToReviewCounts(computedValues = {}, locationNames = []) {
+  const counts = {};
+  for (const locationName of locationNames) {
+    const values = computedValues?.[locationName];
+    if (!values) continue;
+    counts[locationName] = {
+      collected: values.totalReviewsCollected ?? null,
+      totalReviews: values.totalReviewsAsOfNow ?? values.totalReviews ?? null,
+      lastMonth: values.totalReviewsLastMonth ?? null,
+      manualCalculatedReviews: values.manuallyCalculatedReviews ?? null,
+      rating: values.rating ?? null,
+      googleSearchMobile: values.googleSearchMobile ?? null,
+      googleSearchDesktop: values.googleSearchDesktop ?? null,
+      googleMapsMobile: values.googleMapsMobile ?? null,
+      googleMapsDesktop: values.googleMapsDesktop ?? null,
+      calls: values.calls ?? null,
+      chatClicks: null,
+      directions: values.directions ?? null,
+      websiteClicks: values.websiteClicks ?? null,
+    };
+  }
+  return counts;
+}
+
+function hasUsableSavedMetrics(metrics) {
+  if (!metrics) return false;
+  return Number.isFinite(metrics.collected) && Number.isFinite(metrics.totalReviews);
 }
 
 function EditableCell({ value, onChange, className = "" }) {
@@ -98,13 +140,21 @@ export default function ReviewCounterPage() {
   const [endDate, setEndDate] = useState(toInputDate(new Date()));
   const [loading, setLoading] = useState(true);
   const [reportsLoading, setReportsLoading] = useState(true);
+  const [counterLoading, setCounterLoading] = useState(false);
   const [savingReport, setSavingReport] = useState(false);
   const [deletingReportId, setDeletingReportId] = useState("");
   const [loadingReportId, setLoadingReportId] = useState("");
+  const [activeReportId, setActiveReportId] = useState("");
   const [activeReportTitle, setActiveReportTitle] = useState("");
   const [error, setError] = useState("");
   const [reportError, setReportError] = useState("");
+  const [counterError, setCounterError] = useState("");
+  const [reviewCounts, setReviewCounts] = useState({});
   const [status, setStatus] = useState("");
+  const [startupHydrated, setStartupHydrated] = useState(false);
+  const [savedSnapshotKey, setSavedSnapshotKey] = useState("");
+  const buildRequestIdRef = useRef(0);
+  const savedSnapshotKeyRef = useRef("");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -117,8 +167,11 @@ export default function ReviewCounterPage() {
 
       const enabledLocations = (locationsData.locations ?? []).filter((location) => location.is_enabled);
       setLocations(enabledLocations);
-      setSelected(new Set(enabledLocations.map((location) => location.location_name)));
+      if (!savedSnapshotKeyRef.current) {
+        setSelected(new Set(enabledLocations.map((location) => location.location_name)));
+      }
       setManualValues((prev) => {
+        if (savedSnapshotKeyRef.current) return prev;
         const next = emptyManualValues(enabledLocations);
         for (const row of MANUAL_ROWS) {
           for (const location of enabledLocations) {
@@ -159,33 +212,153 @@ export default function ReviewCounterPage() {
     loadReports();
   }, [loadReports]);
 
+  const hydrateSavedReport = useCallback((saved, options = {}) => {
+    const nextManualValues = emptyManualValues(locations);
+    for (const row of MANUAL_ROWS) {
+      for (const [locationName, value] of Object.entries(saved.manualValues?.[row] ?? {})) {
+        nextManualValues[row][locationName] = value;
+      }
+    }
+
+    const savedLocationNames = (saved.locations ?? []).map((location) => location.locationName);
+    const savedReviewCounts = computedValuesToReviewCounts(saved.computedValues, savedLocationNames);
+    const hasSavedSnapshot = savedLocationNames.length > 0 && savedLocationNames.every((locationName) =>
+      Object.prototype.hasOwnProperty.call(savedReviewCounts, locationName) && hasUsableSavedMetrics(savedReviewCounts[locationName])
+    );
+    const nextSnapshotKey = `${saved.startDate}|${saved.endDate}|${[...savedLocationNames].sort().join("|")}`;
+
+    buildRequestIdRef.current += 1;
+    savedSnapshotKeyRef.current = hasSavedSnapshot ? nextSnapshotKey : "";
+    setSavedSnapshotKey(hasSavedSnapshot ? nextSnapshotKey : "");
+    setStartDate(saved.startDate);
+    setEndDate(saved.endDate);
+    setManualValues(nextManualValues);
+    setSelected(new Set(savedLocationNames));
+    setActiveReportId(saved.id ?? "");
+    setActiveReportTitle(saved.title);
+
+    if (hasSavedSnapshot) {
+      setCounterLoading(false);
+      setCounterError("");
+      setReviewCounts(savedReviewCounts);
+      setStatus(`Loaded ${saved.title}.`);
+      return true;
+    }
+
+    setStatus(options.buildingStatus ?? `Building ${saved.title}...`);
+    return false;
+  }, [locations]);
+
   const selectedLocations = useMemo(
     () => locations.filter((location) => selected.has(location.location_name)),
     [locations, selected]
   );
 
-  const report = useMemo(() => {
+  const reportSelectionKey = useMemo(() => {
+    const locationNames = [...selected].sort().join("|");
+    return `${startDate}|${endDate}|${locationNames}`;
+  }, [endDate, selected, startDate]);
+
+  const loadReviewCounts = useCallback(async () => {
+    const requestId = buildRequestIdRef.current + 1;
+    buildRequestIdRef.current = requestId;
+
+    if (!startDate || !endDate || selectedLocations.length === 0) {
+      if (requestId === buildRequestIdRef.current) setReviewCounts({});
+      return;
+    }
+
+    savedSnapshotKeyRef.current = "";
+    setSavedSnapshotKey("");
+    setCounterLoading(true);
+    setCounterError("");
+    setReviewCounts({});
+    try {
+      const params = new URLSearchParams({ startDate, endDate });
+      for (const location of selectedLocations) params.append("location", location.location_name);
+      const res = await fetch(`/api/gbp/review-counter?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load review counts");
+      if (requestId !== buildRequestIdRef.current) return;
+      setReviewCounts(data.counts ?? {});
+      if (data.fetchErrors?.length) setCounterError(data.fetchErrors.join(" | "));
+    } catch (err) {
+      if (requestId !== buildRequestIdRef.current) return;
+      setCounterError(err.message);
+      setReviewCounts({});
+    } finally {
+      if (requestId === buildRequestIdRef.current) setCounterLoading(false);
+    }
+  }, [endDate, selectedLocations, startDate]);
+
+  useEffect(() => {
+    if (!startupHydrated) return;
+    if (savedSnapshotKey && savedSnapshotKey === reportSelectionKey) return;
+    loadReviewCounts();
+  }, [loadReviewCounts, reportSelectionKey, savedSnapshotKey, startupHydrated]);
+
+  useEffect(() => {
+    if (loading || reportsLoading || startupHydrated) return;
+    const latestSavedReport = reports[0];
+    if (latestSavedReport) {
+      hydrateSavedReport(latestSavedReport, { buildingStatus: `Building ${latestSavedReport.title}...` });
+    }
+    setStartupHydrated(true);
+  }, [hydrateSavedReport, loading, reports, reportsLoading, startupHydrated]);
+
+  const report = (() => {
     if (!startDate || !endDate) return { metrics: {} };
 
     const metrics = {};
+    const currentMonth = monthKey(startDate);
+    const priorMonth = previousMonthKey(startDate);
+    const currentEnd = dateValue(endDate);
 
     for (const location of selectedLocations) {
-      const lastMonth = manualNumber("totalReviewsLastMonth", location.location_name);
-      const asOfNow = manualNumber("totalReviewsAsOfNow", location.location_name);
-      const manualCount = manualNumber("manuallyCalculatedReviews", location.location_name);
-      const collected = lastMonth === null || asOfNow === null ? null : asOfNow - lastMonth;
+      const name = location.location_name;
+      const googleCollected = reviewCounts[name]?.collected;
+      const googleTotalReviews = reviewCounts[name]?.totalReviews;
 
-      metrics[location.location_name] = {
+      const previousMonthReports = reports
+        .filter((savedReport) => monthKey(savedReport.endDate) === priorMonth)
+        .filter((savedReport) => Number.isFinite(savedReport.computedValues?.[name]?.totalReviewsAsOfNow))
+        .sort((a, b) => dateValue(b.endDate) - dateValue(a.endDate));
+      const savedLastMonth = previousMonthReports[0]?.computedValues?.[name]?.totalReviewsAsOfNow;
+
+      const previousSameMonthReports = reports
+        .filter((savedReport) => savedReport.id !== activeReportId)
+        .filter((savedReport) => monthKey(savedReport.startDate) === currentMonth)
+        .filter((savedReport) => dateValue(savedReport.endDate) < currentEnd)
+        .filter((savedReport) => Number.isFinite(savedReport.computedValues?.[name]?.manuallyCalculatedReviews))
+        .sort((a, b) => dateValue(b.endDate) - dateValue(a.endDate));
+      const previousSameMonth = previousSameMonthReports[0];
+      const previousManual = previousSameMonth?.computedValues?.[name]?.manuallyCalculatedReviews;
+      const previousCollected = previousSameMonth?.computedValues?.[name]?.totalReviewsCollected;
+
+      const asOfNow = Number.isFinite(googleTotalReviews) ? googleTotalReviews : null;
+      const fallbackLastMonth = Number.isFinite(asOfNow) && Number.isFinite(googleCollected) ? asOfNow - googleCollected : null;
+      const lastMonth = Number.isFinite(savedLastMonth) ? savedLastMonth : fallbackLastMonth;
+      const collected = Number.isFinite(googleCollected)
+        ? googleCollected
+        : lastMonth === null || asOfNow === null ? null : asOfNow - lastMonth;
+      const newSincePrevious = Number.isFinite(collected) && Number.isFinite(previousCollected)
+        ? Math.max(0, collected - previousCollected)
+        : null;
+      const manualCount = Number.isFinite(previousManual) && newSincePrevious !== null
+        ? previousManual + newSincePrevious
+        : collected;
+
+      metrics[name] = {
         lastMonth,
         asOfNow,
         collected,
         manualCount,
-        deleted: collected === null || manualCount === null ? null : collected - manualCount,
+        deleted: manualCount === null || collected === null ? null : manualCount - collected,
       };
     }
 
     return { metrics };
-  }, [endDate, manualValues, selectedLocations, startDate]);
+  })();
 
   function updateManual(row, locationName, value) {
     setManualValues((prev) => ({
@@ -219,14 +392,36 @@ export default function ReviewCounterPage() {
     return (collected / customers) * 100;
   }
 
-  function newConversionRate(locationName) {
-    const reviews = manualNumber("newReviewsCollected", locationName);
-    const customers = manualNumber("customers", locationName);
-    if (reviews === null || !customers) return null;
-    return (reviews / customers) * 100;
+  function performanceMetric(locationName, metricName) {
+    const googleValue = reviewCounts[locationName]?.[metricName];
+    if (Number.isFinite(googleValue)) return googleValue;
+    return null;
+  }
+
+  function chatClicks(locationName) {
+    const googleValue = performanceMetric(locationName, "chatClicks");
+    if (googleValue !== null) return googleValue;
+    return manualNumber("chatClicks", locationName);
+  }
+
+  function engagementPer100Views(locationName) {
+    const websiteClicks = performanceMetric(locationName, "websiteClicks") ?? 0;
+    const calls = performanceMetric(locationName, "calls") ?? 0;
+    const chats = chatClicks(locationName) ?? 0;
+    const directions = performanceMetric(locationName, "directions") ?? 0;
+    const views =
+      (performanceMetric(locationName, "googleSearchMobile") ?? 0) +
+      (performanceMetric(locationName, "googleSearchDesktop") ?? 0) +
+      (performanceMetric(locationName, "googleMapsMobile") ?? 0) +
+      (performanceMetric(locationName, "googleMapsDesktop") ?? 0);
+
+    if (!views) return null;
+    return ((websiteClicks + calls + chats + directions) / views) * 100;
   }
 
   function toggleLocation(locationName) {
+    savedSnapshotKeyRef.current = "";
+    setSavedSnapshotKey("");
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(locationName)) next.delete(locationName);
@@ -236,10 +431,14 @@ export default function ReviewCounterPage() {
   }
 
   function selectAll() {
+    savedSnapshotKeyRef.current = "";
+    setSavedSnapshotKey("");
     setSelected(new Set(locations.map((location) => location.location_name)));
   }
 
   function clearSelection() {
+    savedSnapshotKeyRef.current = "";
+    setSavedSnapshotKey("");
     setSelected(new Set());
   }
 
@@ -249,10 +448,22 @@ export default function ReviewCounterPage() {
       const name = location.location_name;
       values[name] = {
         totalCustomers: totalCustomers(name),
+        totalReviewsLastMonth: report.metrics[name]?.lastMonth ?? null,
+        totalReviewsAsOfNow: report.metrics[name]?.asOfNow ?? null,
         totalReviewsCollected: report.metrics[name]?.collected ?? null,
+        manuallyCalculatedReviews: report.metrics[name]?.manualCount ?? null,
         deletedReviews: report.metrics[name]?.deleted ?? null,
         conversionRate: conversionRate(name),
-        newConversionRate: newConversionRate(name),
+        rating: performanceMetric(name, "rating"),
+        googleSearchMobile: performanceMetric(name, "googleSearchMobile"),
+        googleSearchDesktop: performanceMetric(name, "googleSearchDesktop"),
+        googleMapsMobile: performanceMetric(name, "googleMapsMobile"),
+        googleMapsDesktop: performanceMetric(name, "googleMapsDesktop"),
+        calls: performanceMetric(name, "calls"),
+        chatClicks: chatClicks(name),
+        directions: performanceMetric(name, "directions"),
+        websiteClicks: performanceMetric(name, "websiteClicks"),
+        engagementPer100Views: engagementPer100Views(name),
       };
     }
     return values;
@@ -284,6 +495,7 @@ export default function ReviewCounterPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save report");
       setReports((prev) => [data.report, ...prev]);
+      setActiveReportId(data.report.id);
       setActiveReportTitle(data.report.title);
       setStatus("Report saved.");
     } catch (err) {
@@ -302,21 +514,10 @@ export default function ReviewCounterPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load report");
       const saved = data.report;
-      const nextManualValues = emptyManualValues(locations);
-      for (const row of MANUAL_ROWS) {
-        for (const [locationName, value] of Object.entries(saved.manualValues?.[row] ?? {})) {
-          nextManualValues[row][locationName] = value;
-        }
-      }
-      setStartDate(saved.startDate);
-      setEndDate(saved.endDate);
-      setManualValues(nextManualValues);
-      setSelected(new Set((saved.locations ?? []).map((location) => location.locationName)));
-      setActiveReportTitle(saved.title);
-      setStatus(`Loaded ${saved.title}.`);
+      const loadedFromSnapshot = hydrateSavedReport(saved);
+      if (loadedFromSnapshot) setLoadingReportId("");
     } catch (err) {
       setReportError(err.message);
-    } finally {
       setLoadingReportId("");
     }
   }
@@ -335,6 +536,7 @@ export default function ReviewCounterPage() {
         const deleted = reports.find((report) => report.id === id);
         return deleted?.title === prev ? "" : prev;
       });
+      setActiveReportId((prev) => (prev === id ? "" : prev));
       setStatus("Report deleted.");
     } catch (err) {
       setReportError(err.message);
@@ -344,7 +546,7 @@ export default function ReviewCounterPage() {
   }
 
   function exportCsv() {
-    const rows = buildExportRows();
+    const rows = currentExportRows;
     const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -368,22 +570,77 @@ export default function ReviewCounterPage() {
       ["Cosmetics.lk Customers", ...byLocation((name) => manual("cosmeticsCustomers", name))],
       ["SupplementVault Customers", ...byLocation((name) => manual("supplementCustomers", name))],
       ["Total Customers", ...byLocation((name) => displayNumber(totalCustomers(name)))],
-      ["Total Reviews last Month", ...byLocation((name) => manual("totalReviewsLastMonth", name))],
-      ["Total Reviews as of now", ...byLocation((name) => manual("totalReviewsAsOfNow", name))],
+      ["Total Reviews last Month", ...byLocation((name) => displayNumber(report.metrics[name]?.lastMonth))],
+      ["Total Reviews as of now", ...byLocation((name) => displayNumber(report.metrics[name]?.asOfNow))],
       ["Total Reviews Collected", ...byLocation((name) => displayNumber(report.metrics[name]?.collected))],
-      ["ManuallyCalculated Reviews", ...byLocation((name) => manual("manuallyCalculatedReviews", name))],
+      ["Manually Calculated Reviews", ...byLocation((name) => displayNumber(report.metrics[name]?.manualCount))],
       ["No of Deleted Reviews", ...byLocation((name) => displayNumber(report.metrics[name]?.deleted))],
       ["Conversion Rate", ...byLocation((name) => formatPercent(conversionRate(name)))],
       ["Monthly Target", ...byLocation(() => "25%")],
-      ["New Reviews Collected", ...byLocation((name) => manual("newReviewsCollected", name))],
-      ["Customers", ...byLocation((name) => manual("customers", name))],
-      ["New Customers", ...byLocation((name) => manual("newCustomers", name))],
-      ["Conversion Rate", ...byLocation((name) => formatPercent(newConversionRate(name)))],
+      [],
+      [],
+      [monthLabel(startDate)],
+      [`${formatReportDate(startDate)}-${formatReportDate(endDate)}`],
+      ["Criteria & Location", ...locationLabels],
+      ["Manually Calculated Reviews", ...byLocation((name) => displayNumber(report.metrics[name]?.manualCount))],
+      ["Ratings", ...byLocation((name) => formatRating(performanceMetric(name, "rating")))],
+      ["Google Search - Mobile", ...byLocation((name) => displayNumber(performanceMetric(name, "googleSearchMobile")))],
+      ["Google Search - Desktop", ...byLocation((name) => displayNumber(performanceMetric(name, "googleSearchDesktop")))],
+      ["Google Maps - Mobile", ...byLocation((name) => displayNumber(performanceMetric(name, "googleMapsMobile")))],
+      ["Google Maps - Desktop", ...byLocation((name) => displayNumber(performanceMetric(name, "googleMapsDesktop")))],
+      ["Calls", ...byLocation((name) => displayNumber(performanceMetric(name, "calls")))],
+      ["Chat Clicks", ...byLocation((name) => displayNumber(chatClicks(name)))],
+      ["Directions", ...byLocation((name) => displayNumber(performanceMetric(name, "directions")))],
+      ["Website clicks", ...byLocation((name) => displayNumber(performanceMetric(name, "websiteClicks")))],
+      ["Engagement per 100 views", ...byLocation((name) => formatPercent(engagementPer100Views(name)))],
     ];
   }
 
+  const computedValues = buildComputedValues();
+  const currentExportRows = buildExportRows();
   const invalidRange = startDate && endDate && startOfInputDate(startDate) > startOfInputDate(endDate);
   const missingSelectedCount = [...selected].filter((locationName) => !locations.some((location) => location.location_name === locationName)).length;
+  const reportBuilt = !counterLoading && selectedLocations.length > 0 && selectedLocations.every((location) =>
+    Object.prototype.hasOwnProperty.call(reviewCounts, location.location_name)
+  );
+  const reportReady = reportBuilt && !counterError;
+  const reportBuilding = selectedLocations.length > 0 && !invalidRange && !reportReady;
+
+
+  useEffect(() => {
+    if (loadingReportId && !counterLoading && (reportReady || counterError)) {
+      setLoadingReportId("");
+      if (reportReady && activeReportTitle) setStatus(`Loaded ${activeReportTitle}.`);
+    }
+  }, [activeReportTitle, counterError, counterLoading, loadingReportId, reportReady]);
+
+  useEffect(() => {
+    if (!activeReportId || !reportReady || savedSnapshotKey) return;
+
+    async function updateSnapshot() {
+      try {
+        const res = await fetch(`/api/gbp/review-reports/${activeReportId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            manualValues,
+            computedValues,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to update saved report");
+        const snapshotKey = reportSelectionKey;
+        savedSnapshotKeyRef.current = snapshotKey;
+        setSavedSnapshotKey(snapshotKey);
+        setReports((prev) => prev.map((report) => report.id === activeReportId ? data.report : report));
+        setStatus(`Loaded ${data.report.title}.`);
+      } catch (err) {
+        setReportError(err.message);
+      }
+    }
+
+    updateSnapshot();
+  }, [activeReportId, computedValues, manualValues, reportReady, reportSelectionKey, savedSnapshotKey]);
 
   return (
     <div className="px-8 py-8 space-y-6">
@@ -405,7 +662,7 @@ export default function ReviewCounterPage() {
           </button>
           <button
             onClick={exportCsv}
-            disabled={loading || invalidRange || selectedLocations.length === 0}
+            disabled={loading || invalidRange || !reportReady}
             className="inline-flex items-center gap-1.5 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-200 text-white px-4 py-2 rounded-lg transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -415,13 +672,13 @@ export default function ReviewCounterPage() {
           </button>
           <button
             onClick={saveReportRun}
-            disabled={loading || savingReport || invalidRange || selectedLocations.length === 0}
+            disabled={loading || savingReport || invalidRange || !reportReady}
             className="inline-flex items-center gap-1.5 text-sm font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-4 py-2 rounded-lg transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
-            {savingReport ? "Saving..." : "Run / Save Report"}
+            {reportBuilding ? "Building report..." : savingReport ? "Saving..." : "Run / Save Report"}
           </button>
         </div>
       </div>
@@ -429,6 +686,12 @@ export default function ReviewCounterPage() {
       {(status || reportError) && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${reportError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
           {reportError || status}
+        </div>
+      )}
+
+      {reportBuilding && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800">
+          Building report...
         </div>
       )}
 
@@ -450,7 +713,7 @@ export default function ReviewCounterPage() {
             <input
               type="date"
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(event) => { savedSnapshotKeyRef.current = ""; setSavedSnapshotKey(""); setStartDate(event.target.value); }}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </label>
@@ -459,17 +722,22 @@ export default function ReviewCounterPage() {
             <input
               type="date"
               value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
+              onChange={(event) => { savedSnapshotKeyRef.current = ""; setSavedSnapshotKey(""); setEndDate(event.target.value); }}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </label>
           <div className="flex flex-wrap items-end justify-end gap-2">
-            <button onClick={selectAll} className="text-xs font-medium text-sky-600 hover:text-sky-800 underline">Select all profiles</button>
+            <button onClick={loadReviewCounts} disabled={counterLoading || invalidRange} className="text-xs font-medium text-emerald-600 hover:text-emerald-800 underline disabled:text-slate-300">
+              {counterLoading ? "Counting reviews..." : "Refresh review counts"}
+            </button>
             <span className="text-xs text-slate-300">|</span>
-            <button onClick={clearSelection} className="text-xs font-medium text-slate-500 hover:text-slate-700 underline">Clear profiles</button>
+            <button onClick={selectAll} disabled={counterLoading} className="text-xs font-medium text-sky-600 hover:text-sky-800 underline disabled:text-slate-300">Select all profiles</button>
+            <span className="text-xs text-slate-300">|</span>
+            <button onClick={clearSelection} disabled={counterLoading} className="text-xs font-medium text-slate-500 hover:text-slate-700 underline disabled:text-slate-300">Clear profiles</button>
           </div>
         </div>
         {invalidRange && <p className="mt-3 text-xs font-medium text-rose-600">Start date must be before or equal to end date.</p>}
+        {counterError && <p className="mt-3 text-xs font-medium text-amber-700">{counterError}</p>}
       </section>
 
       {error ? (
@@ -542,14 +810,14 @@ export default function ReviewCounterPage() {
                           <div className="flex justify-end gap-2">
                             <button
                               onClick={() => loadSavedReport(savedReport.id)}
-                              disabled={loadingReportId === savedReport.id}
+                              disabled={Boolean(loadingReportId) || counterLoading || reportBuilding}
                               className="text-xs font-semibold text-sky-600 hover:text-sky-800 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
                             >
-                              {loadingReportId === savedReport.id ? "Loading..." : "Load"}
+                              {loadingReportId === savedReport.id ? "Loading..." : counterLoading ? "Building..." : "Load"}
                             </button>
                             <button
                               onClick={() => deleteSavedReport(savedReport.id)}
-                              disabled={deletingReportId === savedReport.id}
+                              disabled={deletingReportId === savedReport.id || counterLoading || reportBuilding}
                               className="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
                             >
                               {deletingReportId === savedReport.id ? "Deleting..." : "Delete"}
@@ -602,25 +870,27 @@ export default function ReviewCounterPage() {
                   <tr>
                     <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Total Reviews last Month</th>
                     {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("totalReviewsLastMonth", location.location_name)} onChange={(value) => updateManual("totalReviewsLastMonth", location.location_name, value)} className="bg-neutral-100" />
+                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.lastMonth)}</td>
                     ))}
                   </tr>
                   <tr>
                     <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Total Reviews as of now</th>
                     {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("totalReviewsAsOfNow", location.location_name)} onChange={(value) => updateManual("totalReviewsAsOfNow", location.location_name, value)} className="bg-neutral-100" />
+                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.asOfNow)}</td>
                     ))}
                   </tr>
                   <tr>
                     <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Total Reviews Collected</th>
                     {selectedLocations.map((location) => (
-                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{displayNumber(report.metrics[location.location_name]?.collected)}</td>
+                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">
+                        {counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.collected)}
+                      </td>
                     ))}
                   </tr>
                   <tr>
-                    <th className="border border-black bg-green-300 px-1.5 py-0.5 text-left font-normal">ManuallyCalculated Reviews</th>
+                    <th className="border border-black bg-green-300 px-1.5 py-0.5 text-left font-normal">Manually Calculated Reviews</th>
                     {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("manuallyCalculatedReviews", location.location_name)} onChange={(value) => updateManual("manuallyCalculatedReviews", location.location_name, value)} className="bg-green-300 font-bold" />
+                      <td key={location.location_name} className="border border-black bg-green-300 px-1.5 py-0.5 text-right tabular-nums font-bold">{counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.manualCount)}</td>
                     ))}
                   </tr>
                   <tr>
@@ -642,28 +912,78 @@ export default function ReviewCounterPage() {
                       <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">25%</td>
                     ))}
                   </tr>
+                  <tr><td className="h-6" colSpan={selectedLocations.length + 1}></td></tr>
+                  <tr><td className="h-6" colSpan={selectedLocations.length + 1}></td></tr>
                   <tr>
-                    <th className="border border-black bg-orange-200 px-1.5 py-0.5 text-left font-normal">New Reviews Collected</th>
+                    <th className="border border-black px-1.5 py-0.5 text-left font-bold">{monthLabel(startDate)}</th>
                     {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("newReviewsCollected", location.location_name)} onChange={(value) => updateManual("newReviewsCollected", location.location_name, value)} className="bg-orange-200" />
+                      <td key={location.location_name} className="border border-black px-1.5 py-0.5"></td>
                     ))}
                   </tr>
                   <tr>
-                    <th className="border border-black bg-orange-200 px-1.5 py-0.5 text-left font-normal">Customers</th>
+                    <th className="border border-black px-1.5 py-0.5 text-left font-bold">{formatReportDate(startDate)}-{formatReportDate(endDate)}</th>
                     {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("customers", location.location_name)} onChange={(value) => updateManual("customers", location.location_name, value)} className="bg-orange-200" />
+                      <td key={location.location_name} className="border border-black px-1.5 py-0.5"></td>
                     ))}
                   </tr>
                   <tr>
-                    <th className="border border-black bg-orange-200 px-1.5 py-0.5 text-left font-normal">New Customers</th>
+                    <th className="border border-black bg-sky-100 px-1.5 py-0.5 text-left font-bold min-w-55">Criteria &amp; Location</th>
                     {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("newCustomers", location.location_name)} onChange={(value) => updateManual("newCustomers", location.location_name, value)} className="bg-orange-200" />
+                      <th key={location.location_name} className="border border-black bg-sky-100 px-1.5 py-0.5 text-right font-bold whitespace-nowrap min-w-24">{location.display_name}</th>
                     ))}
                   </tr>
                   <tr>
-                    <th className="border border-black bg-orange-200 px-1.5 py-0.5 text-left font-normal">Conversion Rate</th>
+                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Manually Calculated Reviews</th>
                     {selectedLocations.map((location) => (
-                      <td key={location.location_name} className="border border-black bg-orange-200 px-1.5 py-0.5 text-right tabular-nums">{formatPercent(newConversionRate(location.location_name))}</td>
+                      <td key={location.location_name} className="border border-black bg-green-300 px-1.5 py-0.5 text-right tabular-nums font-bold">{counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.manualCount)}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Ratings</th>
+                    {selectedLocations.map((location) => (
+                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : formatRating(performanceMetric(location.location_name, "rating"))}</td>
+                    ))}
+                  </tr>
+                  {[
+                    ["Google Search - Mobile", "googleSearchMobile"],
+                    ["Google Search - Desktop", "googleSearchDesktop"],
+                    ["Google Maps - Mobile", "googleMapsMobile"],
+                    ["Google Maps - Desktop", "googleMapsDesktop"],
+                    ["Calls", "calls"],
+                  ].map(([label, metric]) => (
+                    <tr key={metric}>
+                      <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">{label}</th>
+                      {selectedLocations.map((location) => (
+                        <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : displayNumber(performanceMetric(location.location_name, metric))}</td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr>
+                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Chat Clicks</th>
+                    {selectedLocations.map((location) => {
+                      const googleValue = performanceMetric(location.location_name, "chatClicks");
+                      return googleValue !== null ? (
+                        <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : displayNumber(googleValue)}</td>
+                      ) : (
+                        <EditableCell key={location.location_name} value={manual("chatClicks", location.location_name)} onChange={(value) => updateManual("chatClicks", location.location_name, value)} className="bg-neutral-100" />
+                      );
+                    })}
+                  </tr>
+                  {[
+                    ["Directions", "directions"],
+                    ["Website clicks", "websiteClicks"],
+                  ].map(([label, metric]) => (
+                    <tr key={metric}>
+                      <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">{label}</th>
+                      {selectedLocations.map((location) => (
+                        <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : displayNumber(performanceMetric(location.location_name, metric))}</td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr>
+                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Engagement per 100 views</th>
+                    {selectedLocations.map((location) => (
+                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{counterLoading ? "..." : formatPercent(engagementPer100Views(location.location_name))}</td>
                     ))}
                   </tr>
                 </tbody>

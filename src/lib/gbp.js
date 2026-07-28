@@ -358,6 +358,7 @@ export async function getShowroomStats(email, locationName, dateRange = {}) {
     endYear = 2026,
     endMonth = 5,
     endDay = 1,
+    dailyMetrics,
   } = dateRange;
 
   const auth = await getAuthClientByEmail(email);
@@ -366,7 +367,7 @@ export async function getShowroomStats(email, locationName, dateRange = {}) {
 
   const res = await performance.locations.fetchMultiDailyMetricsTimeSeries({
     location: performanceLocationName,
-    dailyMetrics: [
+    dailyMetrics: dailyMetrics ?? [
       "WEBSITE_CLICKS",
       "CALL_CLICKS",
       "BUSINESS_IMPRESSIONS_DESKTOP_MAPS",

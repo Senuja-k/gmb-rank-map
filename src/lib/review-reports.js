@@ -61,6 +61,22 @@ export async function saveReviewReport(report) {
   return toAppReport(data);
 }
 
+export async function updateReviewReportSnapshot(id, report) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("gbp_review_reports")
+    .update({
+      manual_values: report.manualValues,
+      computed_values: report.computedValues,
+    })
+    .eq("id", id)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw new Error(`updateReviewReportSnapshot: ${error.message}`);
+  return data ? toAppReport(data) : null;
+}
+
 export async function deleteReviewReport(id) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
