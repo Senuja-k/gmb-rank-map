@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getShowroomStats } from "@/lib/gbp";
+import { getSearchKeywordImpressionsMonthly, getShowroomStats } from "@/lib/gbp";
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -32,10 +32,15 @@ export async function GET(request) {
   };
 
   try {
-    const data = await getShowroomStats(email, locationName, dateRange);
-    return NextResponse.json({ data });
+    const [data, searchKeywords] = await Promise.all([
+      getShowroomStats(email, locationName, dateRange),
+      getSearchKeywordImpressionsMonthly(email, locationName, dateRange),
+    ]);
+    return NextResponse.json({ data, searchKeywords });
   } catch (err) {
     console.error("[GBP performance]", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+

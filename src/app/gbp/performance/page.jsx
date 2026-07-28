@@ -89,7 +89,7 @@ function formatChangePercent(value) {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-async function fetchPerformanceRows(selectedLocation, startDate, endDate) {
+async function fetchPerformancePayload(selectedLocation, startDate, endDate) {
   const [startYear, startMonth, startDay] = startDate.split("-");
   const [endYear, endMonth, endDay] = endDate.split("-");
 
@@ -107,7 +107,7 @@ async function fetchPerformanceRows(selectedLocation, startDate, endDate) {
   const res = await fetch(`/api/gbp/performance?${params}`);
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? "Unknown error");
-  return json.data ?? [];
+  return { rows: json.data ?? [], searchKeywords: json.searchKeywords ?? [] };
 }
 
 export default function PerformancePage() {
@@ -121,6 +121,7 @@ export default function PerformancePage() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState(null);
   const [compareRows, setCompareRows] = useState(null);
+  const [searchKeywords, setSearchKeywords] = useState(null);
   const [error, setError] = useState("");
 
   async function handleFetch(e) {
@@ -128,17 +129,19 @@ export default function PerformancePage() {
     setLoading(true);
     setRows(null);
     setCompareRows(null);
+    setSearchKeywords(null);
     setError("");
 
     try {
-      const [periodRows, periodCompareRows] = compareEnabled
+      const [periodPayload, periodComparePayload] = compareEnabled
         ? await Promise.all([
-            fetchPerformanceRows(selectedLocation, startDate, endDate),
-            fetchPerformanceRows(selectedLocation, compareStartDate, compareEndDate),
+            fetchPerformancePayload(selectedLocation, startDate, endDate),
+            fetchPerformancePayload(selectedLocation, compareStartDate, compareEndDate),
           ])
-        : [await fetchPerformanceRows(selectedLocation, startDate, endDate), null];
-      setRows(periodRows);
-      setCompareRows(periodCompareRows);
+        : [await fetchPerformancePayload(selectedLocation, startDate, endDate), null];
+      setRows(periodPayload.rows);
+      setSearchKeywords(periodPayload.searchKeywords);
+      setCompareRows(periodComparePayload?.rows ?? null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -171,6 +174,7 @@ export default function PerformancePage() {
     .reduce((sum, row) => sum + row.total, 0);
   const totalTrackedActivity = totalViews + totalInteractions;
   const topMetric = [...summaryRows].sort((a, b) => b.total - a.total)[0];
+  const totalSearches = (searchKeywords ?? []).reduce((sum, row) => sum + (row.value || row.threshold || 0), 0);
 
   return (
     <div className="px-8 py-8 max-w-6xl">
@@ -330,6 +334,40 @@ export default function PerformancePage() {
             })}
           </div>
 
+          {searchKeywords && (
+            <div className="mb-7 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+              <div className="border-b border-slate-100 px-5 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-800">Searches Breakdown</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">Search terms that showed your Business Profile in Search or Maps.</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Searches</p>
+                    <p className="text-2xl font-bold text-slate-950">{totalSearches.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+              {searchKeywords.length > 0 ? (
+                <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                  {searchKeywords.map((row, index) => {
+                    const displayValue = row.value || row.threshold || 0;
+                    return (
+                      <div key={`${row.keyword}-${index}`} className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 px-5 py-3 text-sm hover:bg-slate-50/70">
+                        <span className="text-slate-400 font-semibold">{index + 1}.</span>
+                        <span className="font-semibold text-slate-700">{row.keyword}</span>
+                        <span className="font-bold text-slate-900">
+                          {row.value ? displayValue.toLocaleString() : `< ${displayValue.toLocaleString()}`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="px-5 py-10 text-center text-sm text-slate-400">No search terms returned for this monthly range.</div>
+              )}
+            </div>
+          )}
           {compareEnabled && compareRows && (
             <div className="mb-7 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               <div className="border-b border-slate-100 px-5 py-4">
@@ -438,4 +476,9 @@ export default function PerformancePage() {
     </div>
   );
 }
+
+
+
+
+
 

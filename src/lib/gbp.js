@@ -404,8 +404,48 @@ export async function getShowroomStats(email, locationName, dateRange = {}) {
   return result;
 }
 
+
+export async function getSearchKeywordImpressionsMonthly(email, locationName, dateRange = {}) {
+  const {
+    startYear = 2026,
+    startMonth = 1,
+    endYear = 2026,
+    endMonth = 5,
+  } = dateRange;
+
+  const auth = await getAuthClientByEmail(email);
+  const performanceLocationName = normalizePerformanceLocationName(locationName);
+  const keywords = [];
+  let pageToken = "";
+
+  do {
+    const params = new URLSearchParams({
+      "monthlyRange.startMonth.year": String(startYear),
+      "monthlyRange.startMonth.month": String(startMonth),
+      "monthlyRange.endMonth.year": String(endYear),
+      "monthlyRange.endMonth.month": String(endMonth),
+      pageSize: "100",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await auth.request({
+      url: `https://businessprofileperformance.googleapis.com/v1/${performanceLocationName}/searchkeywords/impressions/monthly?${params}`,
+      method: "GET",
+    });
+
+    keywords.push(...(res.data.searchKeywordsCounts ?? []).map((item) => ({
+      keyword: item.searchKeyword ?? "",
+      value: Number(item.insightsValue?.value ?? 0),
+      threshold: item.insightsValue?.threshold == null ? null : Number(item.insightsValue.threshold),
+    })));
+    pageToken = res.data.nextPageToken ?? "";
+  } while (pageToken);
+
+  return keywords.sort((a, b) => (b.value || b.threshold || 0) - (a.value || a.threshold || 0));
+}
 function normalizePerformanceLocationName(locationName) {
   if (!locationName) return locationName;
   const locationsIndex = locationName.indexOf("locations/");
   return locationsIndex >= 0 ? locationName.slice(locationsIndex) : locationName;
 }
+
