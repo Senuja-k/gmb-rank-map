@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -6,6 +6,20 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const navItems = [
+  {
+    section: "Dashboard",
+    children: [
+      {
+        label: "Dashboard",
+        href: "/",
+        icon: (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 13h6V4H4v9zm10 7h6V4h-6v16zM4 20h6v-5H4v5z" />
+          </svg>
+        ),
+      },
+    ],
+  },
   {
     section: "Rank Tracker",
     children: [
@@ -20,7 +34,7 @@ const navItems = [
       },
       {
         label: "Scan History",
-        href: "/",
+        href: "/scans",
         icon: (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -393,6 +407,3 @@ export default function Sidebar() {
     </aside>
   );
 }
-
-
-
