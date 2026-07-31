@@ -2,24 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import ChessEasterEgg from "@/components/chess/ChessEasterEgg";
 
 const navItems = [
-  {
-    section: "Dashboard",
-    children: [
-      {
-        label: "Dashboard",
-        href: "/",
-        icon: (
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 13h6V4H4v9zm10 7h6V4h-6v16zM4 20h6v-5H4v5z" />
-          </svg>
-        ),
-      },
-    ],
-  },
   {
     section: "Rank Tracker",
     children: [
@@ -34,7 +21,7 @@ const navItems = [
       },
       {
         label: "Scan History",
-        href: "/scans",
+        href: "/",
         icon: (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -119,6 +106,8 @@ export default function Sidebar() {
   const [budgetError, setBudgetError] = useState(false);
   const [activeKeyIndex, setActiveKeyIndex] = useState(() => getStoredKeyIndex());
   const [profile, setProfile] = useState(null);
+  const [isChessOpen, setIsChessOpen] = useState(false);
+  const logoClicksRef = useRef([]);
 
   const hiddenRoutes = ["/login"];
   const isHidden = hiddenRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"));
@@ -196,6 +185,16 @@ export default function Sidebar() {
     window.location.href = "/login";
   }
 
+  const handleLogoClick = useCallback(() => {
+    const now = Date.now();
+    logoClicksRef.current = [...logoClicksRef.current.filter((time) => now - time <= 3000), now];
+
+    if (logoClicksRef.current.length >= 5) {
+      logoClicksRef.current = [];
+      setIsChessOpen(true);
+    }
+  }, []);
+
   if (isHidden) return null;
 
   return (
@@ -205,7 +204,10 @@ export default function Sidebar() {
     >
       {/* Brand */}
       <div className="px-4 pt-5 pb-4">
-        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+        <div
+          className="flex cursor-default items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+          onClick={handleLogoClick}
+        >
           <div
             className="relative w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-950/30 ring-1 ring-white/20 shrink-0 overflow-hidden"
             style={{ background: "linear-gradient(135deg, #4ade80 0%, #22d3ee 45%, #2563eb 100%)" }}
@@ -404,6 +406,7 @@ export default function Sidebar() {
           Powered by Google APIs &amp; Gemini
         </p>
       </div>
+      <ChessEasterEgg isOpen={isChessOpen} onClose={() => setIsChessOpen(false)} />
     </aside>
   );
 }
