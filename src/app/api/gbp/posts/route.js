@@ -65,6 +65,22 @@ function normalizeFutureScheduledTime(scheduledTime) {
   return parsedScheduledTime.toISOString();
 }
 
+function getPublishErrorStatus(err) {
+  if (
+    err.message?.startsWith("Missing ") ||
+    err.message?.startsWith("No stored tokens")
+  ) {
+    return 400;
+  }
+
+  const googleStatus = err.response?.status ?? err.cause?.status;
+  if (Number.isInteger(googleStatus) && googleStatus >= 400 && googleStatus < 500) {
+    return googleStatus;
+  }
+
+  return 500;
+}
+
 /**
  * GET /api/gbp/posts
  * Returns published posts from all saved+enabled GBP locations.
@@ -112,7 +128,6 @@ export async function GET() {
 }
 
 export async function POST(request) {
-  const supabase = createAdminClient();
   let body;
   try {
     body = await request.json();
@@ -142,21 +157,25 @@ export async function POST(request) {
     );
   }
 
-  // The v4 mybusiness API requires the full "accounts/{id}/locations/{id}" path.
-  // The DB stores location_name as just "locations/{id}" and account_name separately.
-  let fullLocationPath = locationName;
-  if (!locationName.startsWith("accounts/")) {
-    const { data: locRow } = await supabase
-      .from("gbp_locations")
-      .select("account_name")
-      .eq("location_name", locationName)
-      .single();
-    if (locRow?.account_name) {
-      fullLocationPath = `${locRow.account_name}/${locationName}`;
-    }
-  }
-
   try {
+    const supabase = createAdminClient();
+
+    // The v4 mybusiness API requires the full "accounts/{id}/locations/{id}" path.
+    // The DB stores location_name as just "locations/{id}" and account_name separately.
+    let fullLocationPath = locationName;
+    if (!locationName.startsWith("accounts/")) {
+      const { data: locRow, error: locError } = await supabase
+        .from("gbp_locations")
+        .select("account_name")
+        .eq("location_name", locationName)
+        .single();
+
+      if (locError) throw new Error(`Location lookup failed: ${locError.message}`);
+      if (locRow?.account_name) {
+        fullLocationPath = `${locRow.account_name}/${locationName}`;
+      }
+    }
+
     // Legacy: mode=generate uses Gemini from topic text
     if (mode === "generate" && topic) {
       const result = await generateAndPublishPost(email, fullLocationPath, topic, imageUrl);
@@ -192,7 +211,7 @@ export async function POST(request) {
     return NextResponse.json({ apiResponse });
   } catch (err) {
     console.error("[GBP posts]", err);
-    return NextResponse.json({ error: extractGooglePostError(err) }, { status: 500 });
+    return NextResponse.json({ error: extractGooglePostError(err) }, { status: getPublishErrorStatus(err) });
   }
 }
 
