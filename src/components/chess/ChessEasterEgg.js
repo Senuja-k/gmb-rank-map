@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const ChessGame = dynamic(() => import("./ChessGame"), {
   ssr: false,
@@ -11,13 +11,16 @@ const ChessGame = dynamic(() => import("./ChessGame"), {
 export default function ChessEasterEgg({ isOpen, onClose }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
+  const [isRevealing, setIsRevealing] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return undefined;
 
     const previousOverflow = document.body.style.overflow;
+    const revealTimer = window.setTimeout(() => setIsRevealing(false), 1500);
     document.body.style.overflow = "hidden";
-    window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    queueMicrotask(() => setIsRevealing(true));
+    window.setTimeout(() => closeButtonRef.current?.focus(), 900);
 
     function onKeyDown(event) {
       if (event.key === "Escape") {
@@ -47,6 +50,7 @@ export default function ChessEasterEgg({ isOpen, onClose }) {
     document.addEventListener("keydown", onKeyDown);
 
     return () => {
+      window.clearTimeout(revealTimer);
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKeyDown);
     };
@@ -56,10 +60,24 @@ export default function ChessEasterEgg({ isOpen, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-3 py-6 backdrop-blur-sm"
+      className="chess-easter-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-3 py-6 backdrop-blur-sm"
       onMouseDown={onClose}
       role="presentation"
     >
+      <div className="chess-easter-sweep" aria-hidden="true" />
+      <div className="chess-easter-flash" aria-hidden="true" />
+      <div className="chess-easter-pieces" aria-hidden="true">
+        {["\u2654", "\u2655", "\u2656", "\u2658", "\u2657"].map((piece, index) => (
+          <span key={piece} style={{ "--piece-index": index }}>{piece}</span>
+        ))}
+      </div>
+      {isRevealing && (
+        <div className="chess-easter-reveal" aria-hidden="true">
+          {Array.from({ length: 64 }, (_, index) => (
+            <span key={index} style={{ "--square-delay": `${(index % 8) * 18 + Math.floor(index / 8) * 16}ms` }} />
+          ))}
+        </div>
+      )}
       <div
         ref={dialogRef}
         role="dialog"
@@ -78,7 +96,7 @@ export default function ChessEasterEgg({ isOpen, onClose }) {
           <span aria-hidden="true" className="text-xl leading-none">x</span>
         </button>
         <div className="pr-8">
-          <ChessGame />
+          {!isRevealing && <ChessGame />}
         </div>
       </div>
     </div>

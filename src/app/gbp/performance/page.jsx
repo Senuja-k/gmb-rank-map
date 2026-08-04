@@ -64,8 +64,10 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function firstOfYearStr() {
-  return `${new Date().getFullYear()}-01-01`;
+function firstOfMonthStr() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-01`;
 }
 
 function summarizePerformanceRows(rows) {
@@ -112,10 +114,10 @@ async function fetchPerformancePayload(selectedLocation, startDate, endDate) {
 
 export default function PerformancePage() {
   const [selectedLocation, setSelectedLocation] = useState(null);
-  const [startDate, setStartDate] = useState(firstOfYearStr());
+  const [startDate, setStartDate] = useState(firstOfMonthStr());
   const [endDate, setEndDate] = useState(todayStr());
   const [compareEnabled, setCompareEnabled] = useState(false);
-  const [compareStartDate, setCompareStartDate] = useState(firstOfYearStr());
+  const [compareStartDate, setCompareStartDate] = useState(firstOfMonthStr());
   const [compareEndDate, setCompareEndDate] = useState(todayStr());
 
   const [loading, setLoading] = useState(false);

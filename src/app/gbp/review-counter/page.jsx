@@ -74,6 +74,153 @@ function formatRating(value) {
   return Number.isFinite(value) ? value.toFixed(1) : "";
 }
 
+function normalizeHeader(value) {
+  return String(value ?? "").trim().toUpperCase().replaceAll(/\s+/g, "_");
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') quoted = true;
+    else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (char !== "\r") {
+      field += char;
+    }
+  }
+
+  if (field || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows.filter((csvRow) => csvRow.some((value) => String(value ?? "").trim()));
+}
+
+function rowsFromCsv(text) {
+  const parsed = parseCsv(text);
+  const headers = parsed[0]?.map(normalizeHeader) ?? [];
+  return parsed.slice(1).map((row) => {
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = row[index] ?? "";
+    });
+    return record;
+  });
+}
+
+function isWithinInputDateRange(value, startDate, endDate) {
+  const date = String(value ?? "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  return date >= startDate && date <= endDate;
+}
+
+function normalizePhone(value) {
+  return String(value ?? "").replaceAll(/[^\d+]/g, "").trim();
+}
+
+function phoneDedupKey(value, rowIndex) {
+  const raw = normalizePhone(value);
+  const digits = raw.replaceAll(/\D/g, "");
+  const localMobile = digits.startsWith("94") && digits.length === 11 ? `0${digits.slice(2)}` : digits;
+  const isRealMobile = /^07\d{8}$/.test(localMobile);
+  return isRealMobile ? `phone:${localMobile}` : `row:${rowIndex}:${raw}`;
+}
+
+function emptyLocationMap(locations, value = "") {
+  const values = {};
+  for (const location of locations) values[location.location_name] = value;
+  return values;
+}
+
+function defaultCompanySettings(locations) {
+  const settings = {};
+  for (const location of locations) {
+    const label = location.display_name ?? "";
+    settings[location.location_name] = label.toLowerCase().includes("supplement") ? "Pevi" : "SPK";
+  }
+  return settings;
+}
+
+function companyTokens(value) {
+  return String(value ?? "")
+    .split(",")
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function warehouseMatchesCompany(warehouse, settingValue) {
+  const normalizedWarehouse = String(warehouse ?? "").trim().toLowerCase();
+  return companyTokens(settingValue).some((token) => normalizedWarehouse.includes(token));
+}
+
+function calculatePosCustomerCounts({
+  rows,
+  locations,
+  selectedLocations,
+  companySettings,
+  startDate,
+  endDate,
+}) {
+  const phonesByLocation = {};
+  for (const location of selectedLocations) phonesByLocation[location.location_name] = new Set();
+
+  let eligibleRows = 0;
+  rows.forEach((row, rowIndex) => {
+    const statusValue = String(row.STATUS ?? "").trim().toLowerCase();
+    const customerName = String(row.CUSTOMER_NAME ?? "").trim().toLowerCase();
+    const posSale = String(row.POS_SALE ?? "").trim();
+    const warehouse = String(row.POS_WAREHOUSE ?? "").trim();
+    const phone = normalizePhone(row.CUSTOMER_PHONE);
+
+    if (posSale !== "1") return;
+    if (statusValue.includes("void") || statusValue.includes("returned to store")) return;
+    if (customerName.includes("test")) return;
+    if (!isWithinInputDateRange(row.INVOICE_DATE, startDate, endDate)) return;
+    if (!phone) return;
+
+    eligibleRows += 1;
+    const customerKey = phoneDedupKey(phone, rowIndex);
+    for (const location of selectedLocations) {
+      if (warehouseMatchesCompany(warehouse, companySettings[location.location_name])) {
+        phonesByLocation[location.location_name].add(customerKey);
+      }
+    }
+  });
+
+  const counts = emptyLocationMap(locations, null);
+  for (const location of selectedLocations) {
+    counts[location.location_name] = phonesByLocation[location.location_name]?.size ?? 0;
+  }
+
+  return { counts, eligibleRows };
+}
+
 const MANUAL_ROWS = [
   "cosmeticsCustomers",
   "supplementCustomers",
@@ -136,6 +283,13 @@ export default function ReviewCounterPage() {
   const [reports, setReports] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [manualValues, setManualValues] = useState({});
+  const [companySettings, setCompanySettings] = useState({});
+  const [savingCompanySettings, setSavingCompanySettings] = useState(false);
+  const [posDumpRows, setPosDumpRows] = useState([]);
+  const [posDumpFileName, setPosDumpFileName] = useState("");
+  const [posCustomerCounts, setPosCustomerCounts] = useState({});
+  const [posDumpStatus, setPosDumpStatus] = useState("");
+  const [posDumpError, setPosDumpError] = useState("");
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(toInputDate(new Date()));
   const [loading, setLoading] = useState(true);
@@ -180,6 +334,14 @@ export default function ReviewCounterPage() {
         }
         return next;
       });
+      setCompanySettings((prev) => ({
+        ...defaultCompanySettings(enabledLocations),
+        ...prev,
+      }));
+      setPosCustomerCounts((prev) => ({
+        ...emptyLocationMap(enabledLocations, null),
+        ...prev,
+      }));
     } catch (err) {
       setError(err.message);
       setLocations([]);
@@ -191,6 +353,29 @@ export default function ReviewCounterPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const loadCompanySettings = useCallback(async (enabledLocations = locations) => {
+    try {
+      const res = await fetch("/api/gbp/review-counter-settings");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load customer dump settings");
+      setCompanySettings({
+        ...defaultCompanySettings(enabledLocations),
+        ...(data.companySettings ?? {}),
+      });
+    } catch (err) {
+      setReportError(err.message);
+      setCompanySettings((prev) => ({
+        ...defaultCompanySettings(enabledLocations),
+        ...prev,
+      }));
+    }
+  }, [locations]);
+
+  useEffect(() => {
+    if (!locations.length) return;
+    loadCompanySettings(locations);
+  }, [loadCompanySettings, locations]);
 
   const loadReports = useCallback(async () => {
     setReportsLoading(true);
@@ -379,12 +564,87 @@ export default function ReviewCounterPage() {
   }
 
   function totalCustomers(locationName) {
+    const posCount = posCustomerCounts[locationName];
+    if (Number.isFinite(posCount)) return posCount;
     const cosmetics = manualNumber("cosmeticsCustomers", locationName);
     const supplement = manualNumber("supplementCustomers", locationName);
     if (cosmetics === null && supplement === null) return null;
     return (cosmetics ?? 0) + (supplement ?? 0);
   }
 
+  function updateCompanySetting(locationName, value) {
+    setCompanySettings((prev) => ({
+      ...prev,
+      [locationName]: value,
+    }));
+  }
+
+  async function saveCompanySettings() {
+    setSavingCompanySettings(true);
+    setReportError("");
+    setStatus("");
+    try {
+      const res = await fetch("/api/gbp/review-counter-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companySettings }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save customer dump settings");
+      setCompanySettings(data.companySettings ?? companySettings);
+      setStatus("Customer dump settings saved.");
+    } catch (err) {
+      setReportError(err.message);
+    } finally {
+      setSavingCompanySettings(false);
+    }
+  }
+
+  async function uploadPosDump(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setPosDumpStatus("");
+    setPosDumpError("");
+    try {
+      const text = await file.text();
+      const rows = rowsFromCsv(text);
+      if (!rows.length) throw new Error("The uploaded dump has no data rows.");
+
+      setPosDumpRows(rows);
+      setPosDumpFileName(file.name);
+      const { counts, eligibleRows } = calculatePosCustomerCounts({
+        rows,
+        locations,
+        selectedLocations,
+        companySettings,
+        startDate,
+        endDate,
+      });
+      setPosCustomerCounts(counts);
+      setPosDumpStatus(`Loaded ${file.name}: ${eligibleRows} eligible POS row${eligibleRows === 1 ? "" : "s"} for ${formatReportDate(startDate)}-${formatReportDate(endDate)}.`);
+    } catch (err) {
+      setPosDumpError(err.message);
+      setPosDumpRows([]);
+      setPosDumpFileName("");
+      setPosCustomerCounts(emptyLocationMap(locations, null));
+    }
+  }
+
+  useEffect(() => {
+    if (!posDumpRows.length || !posDumpFileName) return;
+    const { counts, eligibleRows } = calculatePosCustomerCounts({
+      rows: posDumpRows,
+      locations,
+      selectedLocations,
+      companySettings,
+      startDate,
+      endDate,
+    });
+    setPosCustomerCounts(counts);
+    setPosDumpStatus(`Loaded ${posDumpFileName}: ${eligibleRows} eligible POS row${eligibleRows === 1 ? "" : "s"} for ${formatReportDate(startDate)}-${formatReportDate(endDate)}.`);
+  }, [companySettings, endDate, locations, posDumpFileName, posDumpRows, selectedLocations, startDate]);
   function conversionRate(locationName) {
     const customers = totalCustomers(locationName);
     const collected = report.metrics[locationName]?.collected;
@@ -569,6 +829,7 @@ export default function ReviewCounterPage() {
       ["Criteria & Location", ...locationLabels],
       ["Cosmetics.lk Customers", ...byLocation((name) => manual("cosmeticsCustomers", name))],
       ["SupplementVault Customers", ...byLocation((name) => manual("supplementCustomers", name))],
+      ["POS Dump Customers", ...byLocation((name) => displayNumber(posCustomerCounts[name]))],
       ["Total Customers", ...byLocation((name) => displayNumber(totalCustomers(name)))],
       ["Total Reviews last Month", ...byLocation((name) => displayNumber(report.metrics[name]?.lastMonth))],
       ["Total Reviews as of now", ...byLocation((name) => displayNumber(report.metrics[name]?.asOfNow))],
@@ -754,6 +1015,58 @@ export default function ReviewCounterPage() {
         </div>
       ) : (
         <>
+          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h2 className="text-sm font-semibold text-slate-800">Customer Dump</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Upload the order invoice dump to fill Total Customers from unique POS customer phone counts.</p>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {locations.map((location) => (
+                  <label key={location.location_name} className="block">
+                    <span className="block text-xs font-semibold text-slate-600 truncate">{location.display_name}</span>
+                    <input
+                      value={companySettings[location.location_name] ?? ""}
+                      onChange={(event) => updateCompanySetting(location.location_name, event.target.value)}
+                      placeholder="Company in POS warehouse"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400">Use comma-separated values when one location should match multiple POS warehouse names.</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={saveCompanySettings}
+                  disabled={savingCompanySettings}
+                  className="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-600 disabled:bg-sky-200"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {savingCompanySettings ? "Saving..." : "Save settings"}
+                </button>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-sky-300">
+                  <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0-12l4 4m-4-4L8 8" />
+                  </svg>
+                  Upload dump report
+                  <input type="file" accept=".csv,text/csv" onChange={uploadPosDump} className="sr-only" />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => { setPosDumpRows([]); setPosDumpFileName(""); setPosCustomerCounts(emptyLocationMap(locations, null)); setPosDumpStatus(""); setPosDumpError(""); }}
+                  className="text-xs font-medium text-slate-500 hover:text-slate-700 underline"
+                >
+                  Clear dump counts
+                </button>
+                {posDumpStatus && <span className="text-xs font-medium text-emerald-700">{posDumpStatus}</span>}
+                {posDumpError && <span className="text-xs font-medium text-red-600">{posDumpError}</span>}
+              </div>
+            </div>
+          </section>
+
           <section className="bg-white border border-slate-200 rounded-xl px-5 py-4">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {locations.map((location) => (
@@ -859,6 +1172,12 @@ export default function ReviewCounterPage() {
                     <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">SupplementVault Customers</th>
                     {selectedLocations.map((location) => (
                       <EditableCell key={location.location_name} value={manual("supplementCustomers", location.location_name)} onChange={(value) => updateManual("supplementCustomers", location.location_name, value)} className="bg-neutral-100" />
+                    ))}
+                  </tr>
+                  <tr>
+                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">POS Dump Customers</th>
+                    {selectedLocations.map((location) => (
+                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{displayNumber(posCustomerCounts[location.location_name])}</td>
                     ))}
                   </tr>
                   <tr>

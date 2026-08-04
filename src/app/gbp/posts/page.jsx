@@ -1,18 +1,18 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
-// ── Gemini model picker (shared constants + localStorage helpers) ─────────────
+// -- Gemini model picker (shared constants + localStorage helpers) -------------
 const AI_MODEL_KEY = "gbp_gemini_model";
 const MODEL_USAGE_KEY = "gbp_model_usage";
 
 const GEMINI_MODELS = [
-  { id: "gemini-3.5-flash",      label: "3.5 Flash",      badgeColor: "bg-violet-100 text-violet-700",   description: "Latest · capable",  rpd: 20,  rpm: 5  },
-  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",  rpd: 500, rpm: 15 },
-  { id: "gemini-3.0-flash",      label: "3.0 Flash",      badgeColor: "bg-teal-100 text-teal-700",       description: "Fast · reliable",   rpd: 20,  rpm: 5  },
-  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded", rpd: 20,  rpm: 5  },
-  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite · low-cost",   rpd: 20,  rpm: 10 },
+  { id: "gemini-3.5-flash",      label: "3.5 Flash",      badgeColor: "bg-violet-100 text-violet-700",   description: "Latest � capable",  rpd: 20,  rpm: 5  },
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest � fastest",  rpd: 500, rpm: 15 },
+  { id: "gemini-3.0-flash",      label: "3.0 Flash",      badgeColor: "bg-teal-100 text-teal-700",       description: "Fast � reliable",   rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable � grounded", rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite � low-cost",   rpd: 20,  rpm: 10 },
 ];
 const DEFAULT_MODEL = GEMINI_MODELS[0].id;
 const GBP_POST_SUMMARY_MAX_CHARS = 1500;
@@ -32,7 +32,7 @@ function persistIncrement(modelId) {
   localStorage.setItem(MODEL_USAGE_KEY, JSON.stringify(raw));
   return raw[modelId].used;
 }
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 const POST_TYPES = [
   { key: "UPDATE", label: "Update" },
@@ -201,7 +201,7 @@ export default function PostsPage() {
   const [commonCtaUrl, setCommonCtaUrl] = useState("");
   const [showCtaSettings, setShowCtaSettings] = useState(false);
   const [ctaDraftCommon, setCtaDraftCommon] = useState("");
-  const [ctaDraftLocs, setCtaDraftLocs] = useState({}); // locationName → cta_url
+  const [ctaDraftLocs, setCtaDraftLocs] = useState({}); // locationName ? cta_url
   const [savingCta, setSavingCta] = useState(false);
 
   // Post prompt settings
@@ -314,6 +314,38 @@ export default function PostsPage() {
   }
 
   function selectModel(id) { setGeminiModel(id); localStorage.setItem(AI_MODEL_KEY, id); }
+
+  function resetComposer() {
+    setPostType("UPDATE");
+    setEventTitle("");
+    setEventStart("");
+    setEventEnd("");
+    setCouponCode("");
+    setOfferTerms("");
+    setCtaActionType("LEARN_MORE");
+    setEventStartTime("");
+    setEventEndTime("");
+    setSameContent(true);
+    setGlobalTitle("");
+    setGlobalContent("");
+    setSelectedLocs(new Set(locations.map((loc) => loc.location_name)));
+    setPerLoc((prev) => {
+      const next = {};
+      for (const loc of locations) {
+        next[loc.location_name] = {
+          imageData: null,
+          title: "",
+          content: "",
+          generating: prev[loc.location_name]?.generating ?? false,
+        };
+      }
+      return next;
+    });
+    setPublishMode("now");
+    setScheduledDate("");
+    setScheduledTime("");
+    setPublishResults(null);
+  }
 
   function toggleLocation(locationName) {
     setSelectedLocs((prev) => {
@@ -536,17 +568,32 @@ export default function PostsPage() {
             Upload images, let Gemini write the content, and publish to one or more locations.
           </p>
         </div>
-        <button
-          onClick={openPromptSettings}
-          className="flex items-center gap-1.5 shrink-0 text-xs font-medium text-slate-600 hover:text-sky-600 border border-slate-200 hover:border-sky-300 bg-white rounded-lg px-3 py-2 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.326 3.326 0 0013 18.35V19a2 2 0 11-4 0v-.65a3.326 3.326 0 00-.97-2.297l-.347-.346z" />
-          </svg>
-          AI Settings
-          {(() => { const m = GEMINI_MODELS.find((x) => x.id === geminiModel); return m ? <span className={`ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${m.badgeColor}`}>{m.label}</span> : null; })()}
-          {postPrompt && <span className="ml-0.5 w-1.5 h-1.5 rounded-full bg-sky-500 inline-block" />}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={resetComposer}
+            disabled={publishing || anyGenerating}
+            className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300 bg-white rounded-lg px-3 py-2 transition-colors disabled:opacity-50"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 019-9 9.75 9.75 0 016.74 2.74L21 8" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 3v5h-5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9 9.75 9.75 0 01-6.74-2.74L3 16" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-5h5" />
+            </svg>
+            Reset
+          </button>
+          <button
+            onClick={openPromptSettings}
+            className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-sky-600 border border-slate-200 hover:border-sky-300 bg-white rounded-lg px-3 py-2 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.326 3.326 0 0013 18.35V19a2 2 0 11-4 0v-.65a3.326 3.326 0 00-.97-2.297l-.347-.346z" />
+            </svg>
+            AI Settings
+            {(() => { const m = GEMINI_MODELS.find((x) => x.id === geminiModel); return m ? <span className={`ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${m.badgeColor}`}>{m.label}</span> : null; })()}
+            {postPrompt && <span className="ml-0.5 w-1.5 h-1.5 rounded-full bg-sky-500 inline-block" />}
+          </button>
+        </div>
       </div>
 
       {/* Post type */}
@@ -709,15 +756,15 @@ export default function PostsPage() {
               <p className="text-[11px] text-slate-400 mt-1.5">
                 {ctaMode === "common"
                   ? commonCtaUrl
-                    ? <><span className="text-slate-500 font-medium">All locations → </span>{commonCtaUrl}</>
-                    : <span className="text-amber-500">No common CTA saved yet — click Manage CTAs</span>
+                    ? <><span className="text-slate-500 font-medium">All locations ? </span>{commonCtaUrl}</>
+                    : <span className="text-amber-500">No common CTA saved yet � click Manage CTAs</span>
                   : "Each location uses its own saved CTA URL"}
               </p>
             </div>
           </div>
         )}
 
-        {/* CTA Button — UPDATE and EVENT only (OFFER uses redeemOnlineUrl) */}
+        {/* CTA Button � UPDATE and EVENT only (OFFER uses redeemOnlineUrl) */}
         {postType !== "OFFER" && (
           <div className="space-y-3">
             <div>
@@ -740,7 +787,7 @@ export default function PostsPage() {
             </div>
             {ctaActionType === "CALL" && (
               <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg px-3 py-2">
-                The &ldquo;Call now&rdquo; button uses your business phone number — no URL needed.
+                The &ldquo;Call now&rdquo; button uses your business phone number � no URL needed.
               </p>
             )}
             {ctaActionType !== "NONE" && ctaActionType !== "CALL" && (
@@ -776,8 +823,8 @@ export default function PostsPage() {
                 <p className="text-[11px] text-slate-400 mt-1.5">
                   {ctaMode === "common"
                     ? commonCtaUrl
-                      ? <><span className="text-slate-500 font-medium">All locations → </span>{commonCtaUrl}</>
-                      : <span className="text-amber-500">No common CTA saved yet — click Manage CTAs</span>
+                      ? <><span className="text-slate-500 font-medium">All locations ? </span>{commonCtaUrl}</>
+                      : <span className="text-amber-500">No common CTA saved yet � click Manage CTAs</span>
                     : "Each location uses its own saved CTA URL"}
                 </p>
               </div>
@@ -873,7 +920,7 @@ export default function PostsPage() {
               type="text"
               value={globalTitle}
               onChange={(e) => setGlobalTitle(e.target.value)}
-              placeholder="Post title…"
+              placeholder="Post title�"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
@@ -883,7 +930,7 @@ export default function PostsPage() {
             <textarea
               value={globalContent}
               onChange={(e) => setGlobalContent(e.target.value)}
-              placeholder="Post body text…"
+              placeholder="Post body text�"
               rows={4}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
             />
@@ -904,11 +951,11 @@ export default function PostsPage() {
         </div>
 
         {locLoading ? (
-          <div className="text-center py-10 text-slate-400 text-sm">Loading locations…</div>
+          <div className="text-center py-10 text-slate-400 text-sm">Loading locations�</div>
         ) : locations.length === 0 ? (
           <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-8 text-center">
             <p className="text-sm text-slate-500">No enabled locations found.</p>
-            <a href="/gbp/connect" className="text-xs text-sky-500 underline mt-1 inline-block">Connect a location →</a>
+            <a href="/gbp/connect" className="text-xs text-sky-500 underline mt-1 inline-block">Connect a location ?</a>
           </div>
         ) : (
           locations.map((loc) => {
@@ -962,7 +1009,7 @@ export default function PostsPage() {
                     >
                       <SparkleIcon />
                       {locData.generating
-                        ? "Generating…"
+                        ? "Generating�"
                         : sameContent
                         ? "Generate shared content from this image"
                         : "Generate content from image"}
@@ -978,7 +1025,7 @@ export default function PostsPage() {
                             type="text"
                             value={locData.title ?? ""}
                             onChange={(e) => setLocContent(loc.location_name, "title", e.target.value)}
-                            placeholder="Post title…"
+                            placeholder="Post title�"
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                           />
                         </div>
@@ -988,7 +1035,7 @@ export default function PostsPage() {
                           <textarea
                             value={locData.content ?? ""}
                             onChange={(e) => setLocContent(loc.location_name, "content", e.target.value)}
-                            placeholder="Post body text…"
+                            placeholder="Post body text�"
                             rows={3}
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
                           />
@@ -1013,7 +1060,7 @@ export default function PostsPage() {
           disabled={publishing || selectedCount === 0}
           className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white font-semibold py-3 rounded-xl text-sm transition-colors"
         >
-          {publishing ? `${publishProgressLabel}…` : `${publishActionLabel} to ${selectedCount} location${selectedCount !== 1 ? "s" : ""}`}
+          {publishing ? `${publishProgressLabel}�` : `${publishActionLabel} to ${selectedCount} location${selectedCount !== 1 ? "s" : ""}`}
         </button>
       )}
 
@@ -1067,7 +1114,7 @@ export default function PostsPage() {
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
               <div>
                 <h2 className="text-base font-bold text-slate-800">CTA URL Settings</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Saved automatically — no need to re-enter on each post.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Saved automatically � no need to re-enter on each post.</p>
               </div>
               <button onClick={() => setShowCtaSettings(false)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1115,7 +1162,7 @@ export default function PostsPage() {
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
               <button onClick={() => setShowCtaSettings(false)} className="text-xs text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors">Cancel</button>
               <button onClick={saveCtaSettings} disabled={savingCta} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-5 py-2 rounded-lg transition-colors">
-                {savingCta ? "Saving…" : "Save"}
+                {savingCta ? "Saving�" : "Save"}
               </button>
             </div>
           </div>
@@ -1196,7 +1243,7 @@ export default function PostsPage() {
               <div className="flex-1" />
               <button onClick={() => setShowPromptSettings(false)} className="text-xs text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors">Cancel</button>
               <button onClick={savePromptSettings} disabled={savingPrompt} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-5 py-2 rounded-lg transition-colors">
-                {savingPrompt ? "Saving…" : "Save"}
+                {savingPrompt ? "Saving�" : "Save"}
               </button>
             </div>
           </div>
