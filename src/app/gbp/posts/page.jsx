@@ -8,11 +8,11 @@ const AI_MODEL_KEY = "gbp_gemini_model";
 const MODEL_USAGE_KEY = "gbp_model_usage";
 
 const GEMINI_MODELS = [
-  { id: "gemini-3.5-flash",      label: "3.5 Flash",      badgeColor: "bg-violet-100 text-violet-700",   description: "Latest · capable",  rpd: 20,  rpm: 5  },
-  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest · fastest",  rpd: 500, rpm: 15 },
-  { id: "gemini-3.0-flash",      label: "3.0 Flash",      badgeColor: "bg-teal-100 text-teal-700",       description: "Fast · reliable",   rpd: 20,  rpm: 5  },
-  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable · grounded", rpd: 20,  rpm: 5  },
-  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite · low-cost",   rpd: 20,  rpm: 10 },
+  { id: "gemini-3.5-flash",      label: "3.5 Flash",      badgeColor: "bg-violet-100 text-violet-700",   description: "Latest Â· capable",  rpd: 20,  rpm: 5  },
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", badgeColor: "bg-emerald-100 text-emerald-700", description: "Newest Â· fastest",  rpd: 500, rpm: 15 },
+  { id: "gemini-3.0-flash",      label: "3.0 Flash",      badgeColor: "bg-teal-100 text-teal-700",       description: "Fast Â· reliable",   rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash",      label: "2.5 Flash",      badgeColor: "bg-sky-100 text-sky-700",         description: "Stable Â· grounded", rpd: 20,  rpm: 5  },
+  { id: "gemini-2.5-flash-lite", label: "2.5 Flash-Lite", badgeColor: "bg-slate-100 text-slate-500",     description: "Lite Â· low-cost",   rpd: 20,  rpm: 10 },
 ];
 const DEFAULT_MODEL = GEMINI_MODELS[0].id;
 const GBP_POST_SUMMARY_MAX_CHARS = 1500;
@@ -757,14 +757,14 @@ export default function PostsPage() {
                 {ctaMode === "common"
                   ? commonCtaUrl
                     ? <><span className="text-slate-500 font-medium">All locations ? </span>{commonCtaUrl}</>
-                    : <span className="text-amber-500">No common CTA saved yet — click Manage CTAs</span>
+                    : <span className="text-amber-500">No common CTA saved yet â€” click Manage CTAs</span>
                   : "Each location uses its own saved CTA URL"}
               </p>
             </div>
           </div>
         )}
 
-        {/* CTA Button — UPDATE and EVENT only (OFFER uses redeemOnlineUrl) */}
+        {/* CTA Button â€” UPDATE and EVENT only (OFFER uses redeemOnlineUrl) */}
         {postType !== "OFFER" && (
           <div className="space-y-3">
             <div>
@@ -787,7 +787,7 @@ export default function PostsPage() {
             </div>
             {ctaActionType === "CALL" && (
               <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg px-3 py-2">
-                The &ldquo;Call now&rdquo; button uses your business phone number — no URL needed.
+                The &ldquo;Call now&rdquo; button uses your business phone number â€” no URL needed.
               </p>
             )}
             {ctaActionType !== "NONE" && ctaActionType !== "CALL" && (
@@ -824,7 +824,7 @@ export default function PostsPage() {
                   {ctaMode === "common"
                     ? commonCtaUrl
                       ? <><span className="text-slate-500 font-medium">All locations ? </span>{commonCtaUrl}</>
-                      : <span className="text-amber-500">No common CTA saved yet — click Manage CTAs</span>
+                      : <span className="text-amber-500">No common CTA saved yet â€” click Manage CTAs</span>
                     : "Each location uses its own saved CTA URL"}
                 </p>
               </div>
@@ -920,7 +920,7 @@ export default function PostsPage() {
               type="text"
               value={globalTitle}
               onChange={(e) => setGlobalTitle(e.target.value)}
-              placeholder="Post title…"
+              placeholder="Post titleâ€¦"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
@@ -930,7 +930,7 @@ export default function PostsPage() {
             <textarea
               value={globalContent}
               onChange={(e) => setGlobalContent(e.target.value)}
-              placeholder="Post body text…"
+              placeholder="Post body textâ€¦"
               rows={4}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
             />
@@ -951,7 +951,7 @@ export default function PostsPage() {
         </div>
 
         {locLoading ? (
-          <div className="text-center py-10 text-slate-400 text-sm">Loading locations…</div>
+          <div className="text-center py-10 text-slate-400 text-sm">Loading locationsâ€¦</div>
         ) : locations.length === 0 ? (
           <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-8 text-center">
             <p className="text-sm text-slate-500">No enabled locations found.</p>
@@ -1009,7 +1009,7 @@ export default function PostsPage() {
                     >
                       <SparkleIcon />
                       {locData.generating
-                        ? "Generating…"
+                        ? "Generatingâ€¦"
                         : sameContent
                         ? "Generate shared content from this image"
                         : "Generate content from image"}
@@ -1025,7 +1025,7 @@ export default function PostsPage() {
                             type="text"
                             value={locData.title ?? ""}
                             onChange={(e) => setLocContent(loc.location_name, "title", e.target.value)}
-                            placeholder="Post title…"
+                            placeholder="Post titleâ€¦"
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                           />
                         </div>
@@ -1035,7 +1035,7 @@ export default function PostsPage() {
                           <textarea
                             value={locData.content ?? ""}
                             onChange={(e) => setLocContent(loc.location_name, "content", e.target.value)}
-                            placeholder="Post body text…"
+                            placeholder="Post body textâ€¦"
                             rows={3}
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
                           />
@@ -1060,7 +1060,7 @@ export default function PostsPage() {
           disabled={publishing || selectedCount === 0}
           className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white font-semibold py-3 rounded-xl text-sm transition-colors"
         >
-          {publishing ? `${publishProgressLabel}…` : `${publishActionLabel} to ${selectedCount} location${selectedCount !== 1 ? "s" : ""}`}
+          {publishing ? `${publishProgressLabel}â€¦` : `${publishActionLabel} to ${selectedCount} location${selectedCount !== 1 ? "s" : ""}`}
         </button>
       )}
 
@@ -1114,7 +1114,7 @@ export default function PostsPage() {
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
               <div>
                 <h2 className="text-base font-bold text-slate-800">CTA URL Settings</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Saved automatically — no need to re-enter on each post.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Saved automatically â€” no need to re-enter on each post.</p>
               </div>
               <button onClick={() => setShowCtaSettings(false)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1162,7 +1162,7 @@ export default function PostsPage() {
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
               <button onClick={() => setShowCtaSettings(false)} className="text-xs text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors">Cancel</button>
               <button onClick={saveCtaSettings} disabled={savingCta} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-5 py-2 rounded-lg transition-colors">
-                {savingCta ? "Saving…" : "Save"}
+                {savingCta ? "Savingâ€¦" : "Save"}
               </button>
             </div>
           </div>
@@ -1243,7 +1243,7 @@ export default function PostsPage() {
               <div className="flex-1" />
               <button onClick={() => setShowPromptSettings(false)} className="text-xs text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors">Cancel</button>
               <button onClick={savePromptSettings} disabled={savingPrompt} className="text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 text-white px-5 py-2 rounded-lg transition-colors">
-                {savingPrompt ? "Saving…" : "Save"}
+                {savingPrompt ? "Savingâ€¦" : "Save"}
               </button>
             </div>
           </div>
