@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const ChessGame = dynamic(() => import("./ChessGame"), {
   ssr: false,
@@ -58,7 +59,7 @@ export default function ChessEasterEgg({ isOpen, onClose }) {
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="chess-easter-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-3 py-6 backdrop-blur-sm"
       onMouseDown={onClose}
@@ -99,6 +100,7 @@ export default function ChessEasterEgg({ isOpen, onClose }) {
           {!isRevealing && <ChessGame />}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

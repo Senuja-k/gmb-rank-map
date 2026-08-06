@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx-js-style";
 import Link from "next/link";
 
 function toInputDate(date) {
@@ -17,11 +18,6 @@ function startOfInputDate(value) {
 function defaultStartDate() {
   const now = new Date();
   return toInputDate(new Date(now.getFullYear(), now.getMonth(), 1));
-}
-
-function csvEscape(value) {
-  const str = String(value ?? "");
-  return /[",\n]/.test(str) ? `"${str.replaceAll('"', '""')}"` : str;
 }
 
 function formatReportDate(value) {
@@ -66,6 +62,18 @@ function displayNumber(value) {
   return value === null || value === undefined || value === "" ? "" : value;
 }
 
+function exportLocationLabel(location) {
+  const source = location.display_name || location.location_name || "";
+  const normalized = source.toLowerCase();
+  if (normalized.includes("kiribathgoda")) return "Kiribathgoda";
+  if (normalized.includes("cool planet") || normalized.includes("coolplanet") || normalized.includes("nugegoda")) return "CoolPlanet";
+  if (normalized.includes("pepiliyana")) return "Pepiliyana";
+  if (normalized.includes("one galle") || normalized.includes("ogf")) return "OGF";
+  if (normalized.includes("maharagama")) return "Maharagama";
+  if (normalized.includes("galle")) return "Galle";
+  if (normalized.includes("supplement")) return "SupplementVault";
+  return source;
+}
 function formatPercent(value) {
   return Number.isFinite(value) ? `${value.toFixed(1)}%` : "";
 }
@@ -222,8 +230,6 @@ function calculatePosCustomerCounts({
 }
 
 const MANUAL_ROWS = [
-  "cosmeticsCustomers",
-  "supplementCustomers",
   "chatClicks",
 ];
 
@@ -601,11 +607,7 @@ export default function ReviewCounterPage() {
 
   function totalCustomers(locationName) {
     const posCount = posCustomerCounts[locationName];
-    if (Number.isFinite(posCount)) return posCount;
-    const cosmetics = manualNumber("cosmeticsCustomers", locationName);
-    const supplement = manualNumber("supplementCustomers", locationName);
-    if (cosmetics === null && supplement === null) return null;
-    return (cosmetics ?? 0) + (supplement ?? 0);
+    return Number.isFinite(posCount) ? posCount : null;
   }
 
   function updateCompanySetting(locationName, value) {
@@ -844,60 +846,126 @@ export default function ReviewCounterPage() {
     }
   }
 
-  function exportCsv() {
-    const rows = currentExportRows;
-    const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `google-reviews-${startDate}-to-${endDate}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function buildExportRows() {
-    const locationLabels = selectedLocations.map((location) => location.display_name);
-    const byLocation = (getValue) => selectedLocations.map((location) => getValue(location.location_name));
-    return [
+  function exportDesignedReport() {
+    const exportOrder = ["Kiribathgoda", "CoolPlanet", "Pepiliyana", "OGF", "Maharagama", "Galle"];
+    const orderedLocations = exportOrder
+      .map((label) => selectedLocations.find((location) => exportLocationLabel(location) === label))
+      .filter(Boolean);
+    const remainingLocations = selectedLocations.filter((location) => !orderedLocations.includes(location));
+    const exportLocations = [...orderedLocations, ...remainingLocations];
+    const locationLabels = exportLocations.map(exportLocationLabel);
+    const byLocation = (getValue) => exportLocations.map((location) => getValue(location.location_name));
+    const reportRange = `${formatReportDate(startDate)}-${formatReportDate(endDate)}`;
+    const rows = [
       ["Google Reviews"],
       [monthLabel(startDate)],
-      [`${formatReportDate(startDate)}-${formatReportDate(endDate)}`],
+      [reportRange],
       ["Criteria & Location", ...locationLabels],
-      ["Cosmetics.lk Customers", ...byLocation((name) => manual("cosmeticsCustomers", name))],
-      ["SupplementVault Customers", ...byLocation((name) => manual("supplementCustomers", name))],
-      ["POS Dump Customers", ...byLocation((name) => displayNumber(posCustomerCounts[name]))],
       ["Total Customers", ...byLocation((name) => displayNumber(totalCustomers(name)))],
       ["Total Reviews last Month", ...byLocation((name) => displayNumber(report.metrics[name]?.lastMonth))],
       ["Total Reviews as of now", ...byLocation((name) => displayNumber(report.metrics[name]?.asOfNow))],
       ["Total Reviews Collected", ...byLocation((name) => displayNumber(report.metrics[name]?.collected))],
       ["Manually Calculated Reviews", ...byLocation((name) => displayNumber(report.metrics[name]?.manualCount))],
       ["No of Deleted Reviews", ...byLocation((name) => displayNumber(report.metrics[name]?.deleted))],
-      ["Conversion Rate", ...byLocation((name) => formatPercent(conversionRate(name)))],
-      ["Monthly Target", ...byLocation(() => "25%")],
+      ["Conversion Rate", ...byLocation((name) => conversionRate(name) / 100)],
+      ["Monthly Target", ...byLocation(() => 0.25)],
       [],
       [],
       [monthLabel(startDate)],
-      [`${formatReportDate(startDate)}-${formatReportDate(endDate)}`],
+      [reportRange],
       ["Criteria & Location", ...locationLabels],
       ["Manually Calculated Reviews", ...byLocation((name) => displayNumber(report.metrics[name]?.manualCount))],
-      ["Ratings", ...byLocation((name) => formatRating(performanceMetric(name, "rating")))],
+      ["Ratings", ...byLocation((name) => numberValue(formatRating(performanceMetric(name, "rating"))))],
       ["Google Search - Mobile", ...byLocation((name) => displayNumber(performanceMetric(name, "googleSearchMobile")))],
       ["Google Search - Desktop", ...byLocation((name) => displayNumber(performanceMetric(name, "googleSearchDesktop")))],
       ["Google Maps - Mobile", ...byLocation((name) => displayNumber(performanceMetric(name, "googleMapsMobile")))],
       ["Google Maps - Desktop", ...byLocation((name) => displayNumber(performanceMetric(name, "googleMapsDesktop")))],
       ["Calls", ...byLocation((name) => displayNumber(performanceMetric(name, "calls")))],
-      ["Chat Clicks", ...byLocation((name) => displayNumber(chatClicks(name)))],
+      ["Chat Clicks", ...byLocation((name) => {
+        const googleValue = performanceMetric(name, "chatClicks");
+        return googleValue !== null ? displayNumber(googleValue) : manual("chatClicks", name);
+      })],
       ["Directions", ...byLocation((name) => displayNumber(performanceMetric(name, "directions")))],
       ["Website clicks", ...byLocation((name) => displayNumber(performanceMetric(name, "websiteClicks")))],
-      ["Engagement per 100 views", ...byLocation((name) => formatPercent(engagementPer100Views(name)))],
+      ["Engagement per 100 views", ...byLocation((name) => engagementPer100Views(name) / 100)],
     ];
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
+    const columnCount = Math.max(...rows.map((row) => row.length));
+    const thinBorder = { style: "thin", color: { rgb: "000000" } };
+    const bordered = { top: thinBorder, right: thinBorder, bottom: thinBorder, left: thinBorder };
+    const fill = (rgb) => ({ patternType: "solid", fgColor: { rgb } });
+    const headerRows = new Set([3, 16]);
+    const greenRows = new Set([8, 17]);
+    const yellowRows = new Set([10]);
+    const borderedRows = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
+    const titleRows = new Set([0, 1, 2, 14, 15]);
+    const percentRows = new Set([10, 11, 27]);
+    const decimalRows = new Set([18]);
+
+    rows.forEach((row, rowIndex) => {
+      for (let colIndex = 0; colIndex < columnCount; colIndex += 1) {
+        const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+        if (!worksheet[address]) worksheet[address] = { t: "s", v: "" };
+        const style = {
+          font: {
+            name: "Aptos Narrow",
+            sz: 10,
+            color: { rgb: rowIndex === 9 ? "FF0000" : "000000" },
+            bold: titleRows.has(rowIndex) || headerRows.has(rowIndex),
+          },
+          alignment: {
+            horizontal: colIndex === 0 ? (headerRows.has(rowIndex) ? "center" : "left") : "right",
+            vertical: "center",
+          },
+        };
+        if (borderedRows.has(rowIndex)) {
+          style.border = bordered;
+          if (headerRows.has(rowIndex)) style.fill = fill("CAEDFB");
+          else if (greenRows.has(rowIndex)) style.fill = fill("8ED973");
+          else if (yellowRows.has(rowIndex)) style.fill = fill("FFFF00");
+          else style.fill = fill("F2F2F2");
+        }
+        worksheet[address].s = style;
+        if (percentRows.has(rowIndex) && colIndex > 0 && worksheet[address].v !== "") worksheet[address].z = "0.0%";
+        if (decimalRows.has(rowIndex) && colIndex > 0 && worksheet[address].v !== "") worksheet[address].z = "0.00";
+      }
+    });
+
+    for (let colIndex = 1; colIndex < columnCount; colIndex += 1) {
+      const totalCustomersCell = XLSX.utils.encode_cell({ r: 4, c: colIndex });
+      const lastMonthCell = XLSX.utils.encode_cell({ r: 5, c: colIndex });
+      const asOfNowCell = XLSX.utils.encode_cell({ r: 6, c: colIndex });
+      const collectedCell = XLSX.utils.encode_cell({ r: 7, c: colIndex });
+      const manualCell = XLSX.utils.encode_cell({ r: 8, c: colIndex });
+      const deletedCell = XLSX.utils.encode_cell({ r: 9, c: colIndex });
+      const conversionCell = XLSX.utils.encode_cell({ r: 10, c: colIndex });
+      const searchMobileCell = XLSX.utils.encode_cell({ r: 19, c: colIndex });
+      const searchDesktopCell = XLSX.utils.encode_cell({ r: 20, c: colIndex });
+      const mapsMobileCell = XLSX.utils.encode_cell({ r: 21, c: colIndex });
+      const mapsDesktopCell = XLSX.utils.encode_cell({ r: 22, c: colIndex });
+      const callsCell = XLSX.utils.encode_cell({ r: 23, c: colIndex });
+      const chatsCell = XLSX.utils.encode_cell({ r: 24, c: colIndex });
+      const directionsCell = XLSX.utils.encode_cell({ r: 25, c: colIndex });
+      const websiteCell = XLSX.utils.encode_cell({ r: 26, c: colIndex });
+      const engagementCell = XLSX.utils.encode_cell({ r: 27, c: colIndex });
+      worksheet[collectedCell].f = `${asOfNowCell}-${lastMonthCell}`;
+      worksheet[deletedCell].f = `${manualCell}-${collectedCell}`;
+      worksheet[conversionCell].f = `IF(${totalCustomersCell}=0,"",${collectedCell}/${totalCustomersCell})`;
+      worksheet[engagementCell].f = `IF(SUM(${searchMobileCell}:${mapsDesktopCell})=0,"",(${callsCell}+${chatsCell}+${directionsCell}+${websiteCell})/SUM(${searchMobileCell}:${mapsDesktopCell}))`;
+    }
+
+    worksheet["!cols"] = [
+      { wch: 25 },
+      ...exportLocations.map((location) => ({ wch: Math.max(10, exportLocationLabel(location).length + 1) })),
+    ];
+    worksheet["!rows"] = rows.map((row) => ({ hpt: row.length === 0 ? 18 : 15 }));
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+    XLSX.writeFile(workbook, `google-reviews-${startDate}-to-${endDate}.xlsx`);
   }
 
   const computedValues = buildComputedValues();
-  const currentExportRows = buildExportRows();
   const invalidRange = startDate && endDate && startOfInputDate(startDate) > startOfInputDate(endDate);
   const missingSelectedCount = [...selected].filter((locationName) => !locations.some((location) => location.location_name === locationName)).length;
   const reportBuilt = !counterLoading && selectedLocations.length > 0 && selectedLocations.every((location) =>
@@ -961,14 +1029,14 @@ export default function ReviewCounterPage() {
             Refresh
           </button>
           <button
-            onClick={exportCsv}
+            onClick={exportDesignedReport}
             disabled={loading || invalidRange || !reportReady}
             className="inline-flex items-center gap-1.5 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-200 text-white px-4 py-2 rounded-lg transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M8 12l4 4m0 0l4-4m-4 4V4" />
             </svg>
-            Export CSV
+            Export Report
           </button>
           <button
             onClick={saveReportRun}
@@ -1201,24 +1269,6 @@ export default function ReviewCounterPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Cosmetics.lk Customers</th>
-                    {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("cosmeticsCustomers", location.location_name)} onChange={(value) => updateManual("cosmeticsCustomers", location.location_name, value)} className="bg-neutral-100" />
-                    ))}
-                  </tr>
-                  <tr>
-                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">SupplementVault Customers</th>
-                    {selectedLocations.map((location) => (
-                      <EditableCell key={location.location_name} value={manual("supplementCustomers", location.location_name)} onChange={(value) => updateManual("supplementCustomers", location.location_name, value)} className="bg-neutral-100" />
-                    ))}
-                  </tr>
-                  <tr>
-                    <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">POS Dump Customers</th>
-                    {selectedLocations.map((location) => (
-                      <td key={location.location_name} className="border border-black bg-neutral-100 px-1.5 py-0.5 text-right tabular-nums">{displayNumber(posCustomerCounts[location.location_name])}</td>
-                    ))}
-                  </tr>
                   <tr>
                     <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Total Customers</th>
                     {selectedLocations.map((location) => (
