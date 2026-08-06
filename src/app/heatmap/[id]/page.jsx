@@ -32,7 +32,63 @@ function formatDate(iso) {
   });
 }
 
-// ── Component ───────────────────────────────────────────────────────────────
+function businessKey(business) {
+  return business?.placeId || business?.name || "";
+}
+
+function findPointBusinessRank(point, activeBusinessKey) {
+  if (!activeBusinessKey) return point.rank;
+  const match = (point.competitors || []).find((comp) => businessKey(comp) === activeBusinessKey);
+  return match?.rank ?? 21;
+}
+
+function formatRank(rank) {
+  return rank > 20 ? "20+" : rank;
+}
+function buildCompetitorSummaries(gridPoints, targetPlaceId) {
+  const map = new Map();
+  for (const point of gridPoints) {
+    for (const comp of point.competitors || []) {
+      if (comp.placeId === targetPlaceId) continue;
+      const key = businessKey(comp);
+      if (!key) continue;
+      if (!map.has(key)) {
+        map.set(key, {
+          placeId: comp.placeId,
+          name: comp.name,
+          ranks: [],
+          top3: 0,
+          lat: comp.lat,
+          lng: comp.lng,
+        });
+      }
+      const entry = map.get(key);
+      entry.ranks.push(comp.rank);
+      if (comp.rank <= 3) entry.top3++;
+    }
+  }
+
+  const totalPoints = gridPoints.length || 1;
+  return Array.from(map.entries())
+    .map(([key, data]) => {
+      const missingPoints = totalPoints - data.ranks.length;
+      const rankTotal = data.ranks.reduce((s, r) => s + r, 0) + missingPoints * 21;
+      const avgRank = rankTotal / totalPoints;
+      return {
+        key,
+        placeId: data.placeId,
+        name: data.name,
+        avgRank: parseFloat(avgRank.toFixed(2)),
+        bestRank: Math.min(...data.ranks),
+        top3Pct: parseFloat(((data.top3 / totalPoints) * 100).toFixed(2)),
+        appearances: data.ranks.length,
+        lat: data.lat,
+        lng: data.lng,
+      };
+    })
+    .sort((a, b) => a.avgRank - b.avgRank || b.appearances - a.appearances || a.bestRank - b.bestRank);
+}
+
 export default function HeatmapDetailPage({ params }) {
   const { id } = use(params);
   const router = useRouter();
@@ -42,6 +98,7 @@ export default function HeatmapDetailPage({ params }) {
   const [error, setError] = useState("");
   const [hideColors, setHideColors] = useState(false);
   const [selectedPointIndex, setSelectedPointIndex] = useState(null);
+  const [selectedBusinessKey, setSelectedBusinessKey] = useState("");
 
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -119,8 +176,9 @@ export default function HeatmapDetailPage({ params }) {
 
     // Add grid markers
     scan.gridPoints.forEach((point, pointIndex) => {
-      const bg = hideColors ? "#9e9e9e" : rankBg(point.rank);
-      const label = point.rank > 20 ? "20+" : String(point.rank);
+      const rank = findPointBusinessRank(point, selectedBusinessKey);
+      const bg = hideColors ? "#9e9e9e" : rankBg(rank);
+      const label = String(formatRank(rank));
       const isSelected = selectedPointIndex === pointIndex;
 
       const markerContent = document.createElement("div");
@@ -209,7 +267,7 @@ export default function HeatmapDetailPage({ params }) {
       mapRef.current.fitBounds(bounds, 40);
       mapRef.current.__boundsFit = true;
     }
-  }, [mapsLoaded, scan, hideColors, selectedPointIndex]);
+  }, [mapsLoaded, scan, hideColors, selectedPointIndex, selectedBusinessKey]);
 
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDelete = useCallback(async () => {
@@ -240,21 +298,49 @@ export default function HeatmapDetailPage({ params }) {
   // ── Computed values ───────────────────────────────────────────────────────
   const gridArea = (scan.gridSize * scan.spacingKm) ** 2;
   const betweenPoints = scan.spacingKm * 1000;
-  const top3Count = scan.gridPoints.filter((p) => p.rank <= 3).length;
+  const displayCompetitors = buildCompetitorSummaries(scan.gridPoints, scan.placeId);
+  const activeBusiness = selectedBusinessKey
+    ? displayCompetitors.find((comp) => businessKey(comp) === selectedBusinessKey)
+    : null;
+  const activeBusinessName = activeBusiness?.name || scan.businessName;
+  const activePlaceId = activeBusiness?.placeId || scan.placeId;
+  const activePointRanks = scan.gridPoints.map((point) => findPointBusinessRank(point, selectedBusinessKey));
+  const top3Count = activePointRanks.filter((rank) => rank <= 3).length;
+  const notRankingCount = activePointRanks.filter((rank) => rank > 20).length;
   const selectedPoint = selectedPointIndex === null ? null : scan.gridPoints[selectedPointIndex];
-  const selectedPointRank = selectedPoint?.rank ?? null;
+  const selectedPointRank = selectedPoint ? findPointBusinessRank(selectedPoint, selectedBusinessKey) : null;
   const selectedPointCompetitors = selectedPoint?.competitors ?? [];
   const selectedPointTop3 = selectedPointRank !== null && selectedPointRank <= 3;
 
-  const competitorsWithPosition = scan.competitors.map((c, i) => ({
+  const competitorsWithPosition = displayCompetitors.map((c, i) => ({
     ...c,
     position: i + 1,
   }));
   const tableCompetitors = selectedPoint
     ? selectedPointCompetitors.map((c) => ({ ...c, position: c.rank }))
     : competitorsWithPosition;
-  const displayRank = selectedPoint ? selectedPointRank : scan.avgRank;
-  const displayTop3Pct = selectedPoint ? (selectedPointTop3 ? 100 : 0) : scan.top3Pct;
+  const displayRank = selectedPoint ? selectedPointRank : (activeBusiness?.avgRank ?? scan.avgRank);
+  const displayTop3Pct = selectedPoint ? (selectedPointTop3 ? 100 : 0) : (activeBusiness?.top3Pct ?? scan.top3Pct);
+  const targetDisplayRank = selectedBusinessKey
+    ? selectedPoint
+      ? selectedPoint.rank
+      : scan.avgRank
+    : displayRank;
+  const targetDisplayTop3Pct = selectedBusinessKey
+    ? selectedPoint
+      ? (selectedPoint.rank <= 3 ? 100 : 0)
+      : scan.top3Pct
+    : displayTop3Pct;
+  const showTargetRankMap = () => {
+    setSelectedBusinessKey("");
+    setSelectedPointIndex(null);
+  };
+  const showBusinessRankMap = (business) => {
+    const key = businessKey(business);
+    if (!key) return;
+    setSelectedBusinessKey(key);
+    setSelectedPointIndex(null);
+  };
 
   return (
     <div className="px-8 py-8">
@@ -275,11 +361,11 @@ export default function HeatmapDetailPage({ params }) {
           {/* Business name & info */}
           <div className="flex-1 min-w-[200px]">
             <h1 className="text-xl font-bold text-[#1a2b4a]">
-              {scan.businessName}
+              {activeBusinessName}
             </h1>
             <div className="flex items-center gap-4 mt-2 text-sm text-slate-400">
               <a
-                href={`https://www.google.com/maps/place/?q=place_id:${scan.placeId}`}
+                href={`https://www.google.com/maps/place/?q=place_id:${activePlaceId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sky-500 hover:text-sky-600 flex items-center gap-1 transition-colors"
@@ -297,12 +383,12 @@ export default function HeatmapDetailPage({ params }) {
           <div className="flex gap-6 text-center">
             <div>
               <p className="text-xs text-slate-400 mb-1">{selectedPoint ? "Point Ranking" : "Avg Ranking"}</p>
-              <span className={rankBadgeClass(displayRank)}>{displayRank > 20 ? "20+" : displayRank}</span>
+              <span className={rankBadgeClass(displayRank)}>{formatRank(displayRank)}</span>
             </div>
             <div>
               <p className="text-xs text-slate-400 mb-1">{selectedPoint ? "Point Top 3" : "Top 3%"}</p>
               <span className={top3BadgeClass(displayTop3Pct)}>
-                {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${scan.top3Pct}%`}
+                {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${displayTop3Pct}%`}
               </span>
             </div>
           </div>
@@ -375,43 +461,56 @@ export default function HeatmapDetailPage({ params }) {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {/* Target business - first row, highlighted */}
-              <tr className="bg-sky-50">
+              <tr className={selectedBusinessKey ? "bg-white hover:bg-slate-50" : "bg-sky-50"}>
                 <td className="px-3 py-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-[#1a2b4a] truncate max-w-[180px]">
+                    <button
+                      type="button"
+                      onClick={showTargetRankMap}
+                      className="font-medium text-left text-[#1a2b4a] truncate max-w-[180px] hover:text-sky-600"
+                      title="Show target rank map"
+                    >
                       {scan.businessName}
-                    </span>
+                    </button>
                     <span className="px-1.5 py-0.5 text-[10px] bg-sky-100 text-sky-600 rounded font-semibold">
                       Target
                     </span>
                   </div>
                 </td>
                 <td className="px-3 py-2.5 text-center">
-                  <span className={rankBadgeClass(displayRank)}>
-                    {displayRank > 20 ? "20+" : displayRank}
+                  <span className={rankBadgeClass(targetDisplayRank)}>
+                    {formatRank(targetDisplayRank)}
                   </span>
                 </td>
                 <td className="px-3 py-2.5 text-center text-slate-500">
-                  {selectedPoint ? (selectedPointRank > 20 ? "20+" : selectedPointRank) : "—"}
+                  {selectedPoint ? formatRank(targetDisplayRank) : "-"}
                 </td>
                 <td className="px-3 py-2.5 text-center">
-                  <span className={top3BadgeClass(displayTop3Pct)}>
-                    {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${scan.top3Pct}%`}
+                  <span className={top3BadgeClass(targetDisplayTop3Pct)}>
+                    {selectedPoint ? (targetDisplayRank <= 3 ? "Yes" : "No") : `${scan.top3Pct}%`}
                   </span>
                 </td>
               </tr>
 
               {/* Competitors */}
               {tableCompetitors.slice(0, 20).map((comp) => (
-                <tr key={comp.placeId}>
+                <tr
+                  key={businessKey(comp)}
+                  className={businessKey(comp) === selectedBusinessKey ? "bg-sky-50" : "hover:bg-slate-50"}
+                >
                   <td className="px-3 py-2.5">
-                    <span className="truncate max-w-[180px] block text-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => showBusinessRankMap(comp)}
+                      className="truncate max-w-[180px] block text-left text-slate-700 hover:text-sky-600"
+                      title="Show this shop rank map"
+                    >
                       {comp.name}
-                    </span>
+                    </button>
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     <span className={rankBadgeClass(selectedPoint ? comp.rank : comp.avgRank)}>
-                      {selectedPoint ? (comp.rank > 20 ? "20+" : comp.rank) : comp.avgRank}
+                      {selectedPoint ? formatRank(comp.rank) : comp.avgRank}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-center text-slate-500">
@@ -446,7 +545,21 @@ export default function HeatmapDetailPage({ params }) {
                 <span className="font-medium text-sky-600">Point {selectedPointIndex + 1}</span>
               </div>
             )}
+            {selectedBusinessKey && (
+              <div className="text-sm">
+                <span className="text-slate-400 mr-1.5">Rank Map:</span>
+                <span className="font-medium text-sky-600">{activeBusinessName}</span>
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-2">
+              {selectedBusinessKey && (
+                <button
+                  onClick={showTargetRankMap}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-sky-200 text-sky-600 hover:border-sky-400 hover:bg-sky-50 transition-colors"
+                >
+                  Target Map
+                </button>
+              )}
               <button
                 onClick={() => setSelectedPointIndex(null)}
                 disabled={!selectedPoint}
@@ -504,7 +617,7 @@ export default function HeatmapDetailPage({ params }) {
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
             {selectedPoint ? "Point Rank" : "Avg Rank"}
           </p>
-          <p className="text-2xl font-bold text-[#1a2b4a]">{displayRank > 20 ? "20+" : displayRank}</p>
+          <p className="text-2xl font-bold text-[#1a2b4a]">{formatRank(displayRank)}</p>
         </div>
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
@@ -524,7 +637,7 @@ export default function HeatmapDetailPage({ params }) {
             {selectedPoint ? "Point Competitors" : "Competitors Found"}
           </p>
           <p className="text-2xl font-bold text-[#1a2b4a]">
-            {selectedPoint ? selectedPointCompetitors.length : scan.competitors.length}
+            {selectedPoint ? selectedPointCompetitors.length : displayCompetitors.length}
           </p>
         </div>
         <div className="bg-white rounded-lg border border-slate-200 p-4">
@@ -532,7 +645,7 @@ export default function HeatmapDetailPage({ params }) {
             {selectedPoint ? "Point Status" : "Not Ranking"}
           </p>
           <p className="text-2xl font-bold text-red-500">
-            {selectedPoint ? (selectedPointRank > 20 ? "Not Ranking" : "Ranking") : scan.gridPoints.filter((p) => p.rank > 20).length}
+            {selectedPoint ? (selectedPointRank > 20 ? "Not Ranking" : "Ranking") : notRankingCount}
           </p>
         </div>
       </div>

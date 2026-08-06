@@ -31,8 +31,9 @@ export function buildCompetitorSummaries(gridPoints, targetPlaceId) {
   const summaries = [];
 
   for (const [placeId, data] of map) {
-    const avgRank =
-      data.ranks.reduce((s, r) => s + r, 0) / data.ranks.length;
+    const missingPoints = totalPoints - data.ranks.length;
+    const rankTotal = data.ranks.reduce((s, r) => s + r, 0) + missingPoints * 21;
+    const avgRank = rankTotal / totalPoints;
     const bestRank = Math.min(...data.ranks);
     summaries.push({
       placeId,
@@ -46,7 +47,7 @@ export function buildCompetitorSummaries(gridPoints, targetPlaceId) {
     });
   }
 
-  summaries.sort((a, b) => a.avgRank - b.avgRank);
+  summaries.sort((a, b) => a.avgRank - b.avgRank || b.appearances - a.appearances || a.bestRank - b.bestRank);
   return summaries;
 }
 
