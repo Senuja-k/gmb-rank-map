@@ -2,6 +2,21 @@ import { NextResponse } from "next/server";
 import { createAdminClient, requireAdminProfile } from "@/lib/supabase-server";
 import { canCreateRole } from "@/lib/rbac";
 
+async function findAuthUserByEmail(admin, email) {
+  const targetEmail = email.trim().toLowerCase();
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+
+    const user = data.users.find((item) => item.email?.toLowerCase() === targetEmail);
+    if (user) return user;
+    if (data.users.length < 1000) break;
+  }
+
+  return null;
+}
+
 export async function GET() {
   try {
     await requireAdminProfile();
@@ -37,14 +52,42 @@ export async function POST(req) {
       email_confirm: true,
       user_metadata: { must_choose_password: true },
     });
-    if (error || !data.user) {
-      return NextResponse.json({ error: error?.message ?? "Could not create user." }, { status: 400 });
+
+    let authUser = data?.user;
+    if (error || !authUser) {
+      if (!error?.message?.toLowerCase().includes("already been registered")) {
+        return NextResponse.json({ error: error?.message ?? "Could not create user." }, { status: 400 });
+      }
+
+      authUser = await findAuthUserByEmail(admin, email);
+      if (!authUser) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+
+      const { data: existingProfile, error: existingProfileError } = await admin
+        .from("profiles")
+        .select("id")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (existingProfileError) throw existingProfileError;
+      if (existingProfile) {
+        return NextResponse.json({ error: "A user with this email address has already been registered." }, { status: 400 });
+      }
+
+      const { error: updateError } = await admin.auth.admin.updateUserById(authUser.id, {
+        password,
+        email_confirm: true,
+        ban_duration: "none",
+        user_metadata: { must_choose_password: true },
+      });
+      if (updateError) throw updateError;
     }
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")
       .insert({
-        id: data.user.id,
+        id: authUser.id,
         email,
         role,
         created_by: actor.id,
@@ -54,7 +97,9 @@ export async function POST(req) {
       .single();
 
     if (profileError) {
-      await admin.auth.admin.deleteUser(data.user.id);
+      if (authUser.id === data?.user?.id) {
+        await admin.auth.admin.deleteUser(authUser.id);
+      }
       return NextResponse.json({ error: profileError.message }, { status: 400 });
     }
 

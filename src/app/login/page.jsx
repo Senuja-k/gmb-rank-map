@@ -71,6 +71,13 @@ export default function LoginPage() {
       const data = await readJsonOrError(res);
       if (!res.ok) throw new Error(data.error ?? "Could not save password choice.");
 
+      if (data.session?.access_token && data.session?.refresh_token) {
+        await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
+      }
+
       router.push("/");
       router.refresh();
     } catch (err) {

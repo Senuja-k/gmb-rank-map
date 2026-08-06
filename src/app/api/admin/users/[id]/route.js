@@ -65,3 +65,36 @@ export async function PATCH(req, { params }) {
     return NextResponse.json({ error: error.message }, { status: error.status ?? 500 });
   }
 }
+
+
+export async function DELETE(req, { params }) {
+  try {
+    const actor = await requireAdminProfile();
+    const { id } = await params;
+    const admin = createAdminClient();
+
+    const { data: target, error: targetError } = await admin
+      .from("profiles")
+      .select("id, email, role, is_active")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (targetError) throw targetError;
+    if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
+    if (actor.id === id) {
+      return NextResponse.json({ error: "You cannot delete your own account." }, { status: 400 });
+    }
+    if (!canDisableRole(actor.role, target.role)) {
+      return NextResponse.json({ error: "You cannot delete this user." }, { status: 403 });
+    }
+
+    const { error: authError } = await admin.auth.admin.deleteUser(id);
+    if (authError) throw authError;
+
+    await admin.from("profiles").delete().eq("id", id);
+
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: error.status ?? 500 });
+  }
+}

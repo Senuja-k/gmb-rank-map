@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-const STAR_MAP = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
 const VIEW_METRICS = new Set([
   "BUSINESS_IMPRESSIONS_DESKTOP_MAPS",
   "BUSINESS_IMPRESSIONS_DESKTOP_SEARCH",
@@ -26,14 +25,6 @@ function defaultDateRange() {
   };
 }
 
-function starCount(rating) {
-  return STAR_MAP[rating] ?? 0;
-}
-
-function formatDate(iso) {
-  if (!iso) return "";
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
 
 function dateParts(date) {
   return {
@@ -64,7 +55,6 @@ function buildPerformanceUrl(location, start, end) {
 }
 
 export default function DashboardPage() {
-  const [reviews, setReviews] = useState([]);
   const [locations, setLocations] = useState([]);
   const [performanceRows, setPerformanceRows] = useState([]);
   const [dateRange, setDateRange] = useState(() => defaultDateRange());
@@ -79,12 +69,7 @@ export default function DashboardPage() {
       setPerformanceError("");
 
       try {
-        const [reviewsResponse, locationsResponse] = await Promise.all([
-          fetch("/api/gbp/reviews?view=all", { cache: "no-store" }),
-          fetch("/api/gbp/connect/saved", { cache: "no-store" }),
-        ]);
-
-        const reviewsJson = reviewsResponse.ok ? await reviewsResponse.json() : { reviews: [] };
+        const locationsResponse = await fetch("/api/gbp/connect/saved", { cache: "no-store" });
         const locationsJson = locationsResponse.ok ? await locationsResponse.json() : { locations: [] };
         const enabledLocations = (locationsJson.locations ?? []).filter((location) => location.is_enabled);
 
@@ -105,8 +90,6 @@ export default function DashboardPage() {
         );
 
         if (cancelled) return;
-
-        setReviews(reviewsJson.reviews ?? []);
         setLocations(enabledLocations);
         setPerformanceRows(performanceResults.filter((result) => result.status === "fulfilled").map((result) => result.value));
         if (performanceResults.some((result) => result.status === "rejected")) {
@@ -114,7 +97,6 @@ export default function DashboardPage() {
         }
       } catch (error) {
         if (!cancelled) {
-          setReviews([]);
           setLocations([]);
           setPerformanceRows([]);
           setPerformanceError(error.message || "Dashboard data could not be loaded.");
@@ -164,8 +146,6 @@ export default function DashboardPage() {
   );
 
   const stats = useMemo(() => {
-    const ratingTotal = reviews.reduce((sum, review) => sum + starCount(review.starRating), 0);
-    const answered = reviews.filter((review) => review.reviewReply).length;
     const views = performanceMetricTotals
       .filter((row) => VIEW_METRICS.has(row.metric))
       .reduce((sum, row) => sum + row.total, 0);
@@ -174,16 +154,12 @@ export default function DashboardPage() {
       .reduce((sum, row) => sum + row.total, 0);
 
     return {
-      totalReviews: reviews.length,
-      unansweredReviews: reviews.length - answered,
-      replyRate: reviews.length ? (answered / reviews.length) * 100 : 0,
-      avgRating: reviews.length ? ratingTotal / reviews.length : 0,
       views,
       interactions,
       activeLocations: locations.length,
       engagementRate: views ? (interactions / views) * 100 : 0,
     };
-  }, [locations.length, performanceMetricTotals, reviews]);
+  }, [locations.length, performanceMetricTotals]);
 
   const performanceByLocation = useMemo(
     () =>
@@ -205,13 +181,6 @@ export default function DashboardPage() {
     [performanceRows],
   );
 
-  const recentReviews = useMemo(
-    () =>
-      [...reviews]
-        .sort((a, b) => new Date(b.createTime ?? 0).getTime() - new Date(a.createTime ?? 0).getTime())
-        .slice(0, 6),
-    [reviews],
-  );
 
   const totalSearches = [...searchKeywordTotals.values()].reduce((sum, value) => sum + value, 0);
   const maxLocationViews = Math.max(1, ...performanceByLocation.map((row) => row.views));
@@ -222,7 +191,7 @@ export default function DashboardPage() {
       <div className="flex flex-wrap items-end justify-between gap-4 mb-7">
         <div>
           <h1 className="text-2xl font-bold text-[#1a2b4a]">Performance Dashboard</h1>
-          <p className="text-sm text-slate-400 mt-0.5">Google Business Profile visibility, actions and review health</p>
+          <p className="text-sm text-slate-400 mt-0.5">Google Business Profile visibility and actions</p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-xs font-semibold uppercase tracking-widest text-slate-400">
@@ -260,19 +229,7 @@ export default function DashboardPage() {
           { label: "Views", value: stats.views.toLocaleString(), helper: "Selected period" },
           { label: "Interactions", value: stats.interactions.toLocaleString(), helper: "Selected period" },
           { label: "Engagement Rate", value: `${stats.engagementRate.toFixed(1)}%`, helper: "Interactions per view" },
-          { label: "Locations", value: stats.activeLocations.toLocaleString(), helper: "Enabled profiles" },
-          {
-            label: "Avg Rating",
-            value: stats.avgRating ? stats.avgRating.toFixed(2) : "0",
-            helper: "Review support",
-            tone: stats.avgRating >= 4 ? "text-emerald-500" : stats.avgRating >= 3 ? "text-amber-500" : "text-red-500",
-          },
-          {
-            label: "Unanswered",
-            value: stats.unansweredReviews.toLocaleString(),
-            helper: "Review replies",
-            tone: stats.unansweredReviews ? "text-red-500" : "text-emerald-500",
-          },
+          { label: "Locations", value: stats.activeLocations.toLocaleString(), helper: "Enabled profiles" }
         ].map((card) => (
           <div key={card.label} className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-2">{card.label}</p>
@@ -355,71 +312,6 @@ export default function DashboardPage() {
                 ))
               ) : (
                 <div className="md:col-span-2 py-10 text-center text-sm text-slate-400">No search term data loaded.</div>
-              )}
-            </div>
-          </section>
-
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <h2 className="text-sm font-semibold text-slate-800">Review Snapshot</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Supporting review health</p>
-            </div>
-            <div className="p-5 space-y-5">
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="font-semibold text-slate-700">Reply rate</span>
-                  <span className="text-slate-400">{stats.replyRate.toFixed(1)}%</span>
-                </div>
-                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${stats.replyRate}%` }} />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="font-semibold text-slate-700">Reviews</span>
-                  <span className="text-slate-400">{stats.totalReviews}</span>
-                </div>
-                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-amber-400"
-                    style={{ width: `${stats.totalReviews ? Math.max(8, ((stats.totalReviews - stats.unansweredReviews) / stats.totalReviews) * 100) : 0}%` }}
-                  />
-                </div>
-              </div>
-              <Link href="/gbp/reviews" className="block text-xs font-semibold text-sky-500 hover:text-sky-600">
-                Open reviews
-              </Link>
-            </div>
-          </section>
-
-          <section className="xl:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-800">Recent Reviews</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Latest customer feedback, kept secondary to performance</p>
-              </div>
-              <Link href="/gbp/reviews" className="text-xs font-semibold text-sky-500 hover:text-sky-600">
-                View all
-              </Link>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100">
-              {recentReviews.length ? (
-                recentReviews.map((review) => (
-                  <div key={review.name ?? `${review.locationName}-${review.createTime}`} className="px-5 py-3.5 flex items-center gap-4">
-                    <div className="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 text-sm font-bold flex items-center justify-center">{starCount(review.starRating)}</div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm text-slate-700 truncate">{review.reviewer?.displayName ?? "Customer"}</p>
-                      <p className="text-xs text-slate-400 truncate">
-                        {review.locationDisplayName} - {formatDate(review.createTime)}
-                      </p>
-                    </div>
-                    <span className={`text-xs font-bold rounded-full px-2 py-1 ${review.reviewReply ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
-                      {review.reviewReply ? "Replied" : "Open"}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="md:col-span-2 xl:col-span-3 px-5 py-10 text-center text-sm text-slate-400">No reviews loaded.</div>
               )}
             </div>
           </section>

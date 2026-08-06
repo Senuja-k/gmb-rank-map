@@ -95,6 +95,17 @@ export default function AdminUsersPage() {
     setUsers((current) => current.map((user) => (user.id === id ? data.user : user)));
   }
 
+  async function deleteUser(id) {
+    setError("");
+    const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+    const data = await readJsonOrError(res);
+    if (!res.ok) {
+      setError(data.error ?? "Could not delete user.");
+      return;
+    }
+    setUsers((current) => current.filter((user) => user.id !== id));
+  }
+
   async function copyLoginLink() {
     const loginUrl = `${window.location.origin}/login`;
     setCopyStatus("");

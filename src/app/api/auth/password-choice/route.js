@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient, getCurrentUser } from "@/lib/supabase-server";
+import { createAdminClient, createAnonServerClient, getCurrentUser, setAuthCookies } from "@/lib/supabase-server";
 
 export async function POST(req) {
   const user = await getCurrentUser();
@@ -28,5 +28,25 @@ export async function POST(req) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true });
+  if (action !== "change") {
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!user.email) {
+    return NextResponse.json({ error: "Could not refresh login after changing password." }, { status: 400 });
+  }
+
+  const supabase = createAnonServerClient();
+  const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: newPassword,
+  });
+
+  if (loginError || !loginData.session) {
+    return NextResponse.json({ error: "Password changed, but automatic login failed. Sign in again with the new password." }, { status: 400 });
+  }
+
+  const response = NextResponse.json({ ok: true, session: loginData.session });
+  setAuthCookies(response, loginData.session);
+  return response;
 }
