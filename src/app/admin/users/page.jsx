@@ -22,6 +22,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState("user");
   const [error, setError] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -146,7 +147,16 @@ export default function AdminUsersPage() {
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">Temporary password</label>
-          <input type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+          <div className="relative">
+            <input type={showPassword ? "text" : "password"} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+            <button
+              type="button"
+              onClick={() => setShowPassword((current) => !current)}
+              className="absolute inset-y-0 right-3 text-xs font-semibold text-slate-500 hover:text-sky-600"
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">Role</label>
