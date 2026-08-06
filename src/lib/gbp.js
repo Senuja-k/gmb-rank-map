@@ -49,6 +49,42 @@ const DEFAULT_REVIEW_INSTRUCTION =
 
 // ── 1. Review helpers ─────────────────────────────────────────────────────────
 
+const TRANSIENT_GOOGLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function googleErrorStatus(err) {
+  return err?.response?.status ?? err?.code ?? err?.status ?? null;
+}
+
+function isTransientGoogleError(err) {
+  const status = Number(googleErrorStatus(err));
+  return TRANSIENT_GOOGLE_STATUS_CODES.has(status);
+}
+
+async function requestWithTransientRetry(auth, request, options = {}) {
+  const { attempts = 4, baseDelayMs = 700 } = options;
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await auth.request(request);
+    } catch (err) {
+      lastError = err;
+      if (!isTransientGoogleError(err) || attempt === attempts) throw err;
+      const retryAfter = Number(err?.response?.headers?.["retry-after"]);
+      const retryDelay = Number.isFinite(retryAfter)
+        ? retryAfter * 1000
+        : baseDelayMs * 2 ** (attempt - 1);
+      await wait(retryDelay);
+    }
+  }
+
+  throw lastError;
+}
+
 /** Fetch reviews for a single location. */
 export async function fetchReviewsForLocation(email, locationName, options = {}) {
   const { onlyUnreplied = false } = options;
@@ -60,7 +96,7 @@ export async function fetchReviewsForLocation(email, locationName, options = {})
     const params = new URLSearchParams({ pageSize: "50" });
     if (pageToken) params.set("pageToken", pageToken);
 
-    const res = await auth.request({
+    const res = await requestWithTransientRetry(auth, {
       url: `https://mybusiness.googleapis.com/v4/${locationName}/reviews?${params}`,
       method: "GET",
     });

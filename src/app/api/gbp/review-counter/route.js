@@ -1,8 +1,9 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { fetchReviewsForLocation, getShowroomStats } from "@/lib/gbp";
 import { createAdminClient } from "@/lib/supabase-server";
 
 const COLOMBO_OFFSET = "+05:30";
+const REVIEW_COUNTER_CONCURRENCY = 3;
 
 function parseDateBoundary(value, boundary) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? "")) return null;
@@ -36,6 +37,22 @@ function sumMetric(rows, metricName) {
   return (row?.timeSeries?.datedValues ?? []).reduce((sum, point) => sum + Number(point.value ?? 0), 0);
 }
 
+function reviewMarker(review) {
+  const createTime = review.createTime ?? "";
+  if (!createTime) return null;
+  return {
+    name: review.name ?? "",
+    createTime,
+  };
+}
+
+function sortReviewMarkers(markers) {
+  return markers.sort((a, b) => {
+    const timeCompare = new Date(a.createTime).getTime() - new Date(b.createTime).getTime();
+    if (timeCompare !== 0) return timeCompare;
+    return String(a.name).localeCompare(String(b.name));
+  });
+}
 function inputDateParts(value) {
   const [year, month, day] = value.split("-").map(Number);
   return { year, month, day };
@@ -54,6 +71,26 @@ function toDateRange(startDate, endDate) {
   };
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = { status: "fulfilled", value: await mapper(items[index], index) };
+      } catch (err) {
+        results[index] = { status: "rejected", reason: err };
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -80,8 +117,10 @@ export async function GET(request) {
       ? locations.filter((location) => requestedLocations.has(location.location_name))
       : locations;
 
-    const results = await Promise.allSettled(
-      selectedLocations.map(async (location) => {
+    const results = await mapWithConcurrency(
+      selectedLocations,
+      REVIEW_COUNTER_CONCURRENCY,
+      async (location) => {
         const locationName = fullLocationName(location);
         const metricErrors = [];
         let reviews = [];
@@ -97,6 +136,12 @@ export async function GET(request) {
           const createdAt = new Date(review.createTime ?? 0);
           return createdAt >= start && createdAt < end;
         }).length;
+        const reviewMarkers = sortReviewMarkers(
+          reviews
+            .map(reviewMarker)
+            .filter(Boolean)
+            .filter((marker) => new Date(marker.createTime) < end)
+        );
         const ratingValues = reviews.map((review) => starNumber(review.starRating)).filter(Number.isFinite);
         const rating = ratingValues.length
           ? Number((ratingValues.reduce((sum, value) => sum + value, 0) / ratingValues.length).toFixed(1))
@@ -123,6 +168,7 @@ export async function GET(request) {
         return [location.location_name, {
           collected,
           totalReviews: reviews.length,
+          reviewMarkers,
           rating,
           googleSearchMobile,
           googleSearchDesktop,
@@ -134,7 +180,7 @@ export async function GET(request) {
           websiteClicks,
           errors: metricErrors,
         }];
-      })
+      }
     );
 
     const counts = {};

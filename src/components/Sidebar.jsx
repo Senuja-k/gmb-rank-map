@@ -213,18 +213,16 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="w-55 shrink-0 flex flex-col h-screen sticky top-0 overflow-hidden"
-      style={{ background: "linear-gradient(180deg, #0f1c33 0%, #1a2b4a 100%)" }}
+      className="liquid-sidebar w-55 shrink-0 flex flex-col h-screen sticky top-0 overflow-hidden"
     >
       {/* Brand */}
       <div className="px-4 pt-5 pb-4">
         <div
-          className="flex cursor-default items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+          className="liquid-brand flex cursor-default items-center gap-3 rounded-2xl px-3 py-3"
           onClick={handleLogoClick}
         >
           <div
-            className="relative w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-950/30 ring-1 ring-white/20 shrink-0 overflow-hidden"
-            style={{ background: "linear-gradient(135deg, #4ade80 0%, #22d3ee 45%, #2563eb 100%)" }}
+            className="liquid-logo relative w-11 h-11 rounded-2xl flex items-center justify-center ring-1 ring-white/25 shrink-0 overflow-hidden"
           >
             <div className="absolute inset-x-2 top-1 h-4 rounded-full bg-white/25 blur-sm" />
             <svg className="relative w-5 h-5 text-white drop-shadow-sm" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
@@ -258,9 +256,9 @@ export default function Sidebar() {
                   <li key={item.href}>
                     <Link
                       href={item.href}
-                      className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] transition-all duration-150 ${
+                      className={`liquid-nav-link group flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] transition-all duration-150 ${
                         isActive
-                          ? "bg-sky-500/20 text-sky-300 font-medium"
+                          ? "liquid-nav-link-active text-white font-semibold"
                           : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                       }`}
                     >
@@ -290,7 +288,7 @@ export default function Sidebar() {
           <div className="mx-4 h-px bg-white/6" />
           <div className="px-4 py-3">
             <p className="text-[9px] text-red-400 font-medium">
-              ? API Usage unavailable — run the Supabase migration
+              ? API Usage unavailable Ã¢â‚¬â€ run the Supabase migration
             </p>
           </div>
         </>
@@ -314,7 +312,7 @@ export default function Sidebar() {
                   <button
                     key={i}
                     onClick={() => switchKey(i)}
-                    title={`Key ${i + 1} — ${kb ? `${(kb.textSearchCalls + kb.nearbySearchCalls).toLocaleString()} / ${kb.totalFreeLimit.toLocaleString()}` : "unknown"}`}
+                    title={`Key ${i + 1} Ã¢â‚¬â€ ${kb ? `${(kb.textSearchCalls + kb.nearbySearchCalls).toLocaleString()} / ${kb.totalFreeLimit.toLocaleString()}` : "unknown"}`}
                     className={`flex-1 py-1.5 rounded-md text-[10px] font-semibold transition-all flex flex-col items-center gap-0.5 ${
                       isActive
                         ? "bg-sky-500/25 text-sky-300 ring-1 ring-sky-500/50"

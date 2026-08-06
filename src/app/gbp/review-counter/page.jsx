@@ -244,6 +244,8 @@ function computedValuesToReviewCounts(computedValues = {}, locationNames = []) {
     counts[locationName] = {
       collected: values.totalReviewsCollected ?? null,
       totalReviews: values.totalReviewsAsOfNow ?? values.totalReviews ?? null,
+      reviewMarkers: values.reviewMarkers ?? [],
+      lastCountedReview: values.lastCountedReview ?? null,
       lastMonth: values.totalReviewsLastMonth ?? null,
       manualCalculatedReviews: values.manuallyCalculatedReviews ?? null,
       rating: values.rating ?? null,
@@ -258,6 +260,28 @@ function computedValuesToReviewCounts(computedValues = {}, locationNames = []) {
     };
   }
   return counts;
+}
+
+function markerTime(marker) {
+  const time = new Date(marker?.createTime ?? 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function compareReviewMarkers(a, b) {
+  const timeCompare = markerTime(a) - markerTime(b);
+  if (timeCompare !== 0) return timeCompare;
+  return String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
+}
+
+function markerAfter(marker, previousMarker) {
+  if (!previousMarker?.createTime) return true;
+  return compareReviewMarkers(marker, previousMarker) > 0;
+}
+
+function endBoundaryMarker(endDate) {
+  const boundary = new Date(`${endDate}T00:00:00`);
+  boundary.setDate(boundary.getDate() + 1);
+  return { createTime: boundary.toISOString(), name: "" };
 }
 
 function hasUsableSavedMetrics(metrics) {
@@ -404,7 +428,6 @@ export default function ReviewCounterPage() {
         nextManualValues[row][locationName] = value;
       }
     }
-
     const savedLocationNames = (saved.locations ?? []).map((location) => location.locationName);
     const savedReviewCounts = computedValuesToReviewCounts(saved.computedValues, savedLocationNames);
     const hasSavedSnapshot = savedLocationNames.length > 0 && savedLocationNames.every((locationName) =>
@@ -495,7 +518,6 @@ export default function ReviewCounterPage() {
     if (!startDate || !endDate) return { metrics: {} };
 
     const metrics = {};
-    const currentMonth = monthKey(startDate);
     const priorMonth = previousMonthKey(startDate);
     const currentEnd = dateValue(endDate);
 
@@ -510,34 +532,48 @@ export default function ReviewCounterPage() {
         .sort((a, b) => dateValue(b.endDate) - dateValue(a.endDate));
       const savedLastMonth = previousMonthReports[0]?.computedValues?.[name]?.totalReviewsAsOfNow;
 
-      const previousSameMonthReports = reports
+      const previousReports = reports
         .filter((savedReport) => savedReport.id !== activeReportId)
-        .filter((savedReport) => monthKey(savedReport.startDate) === currentMonth)
         .filter((savedReport) => dateValue(savedReport.endDate) < currentEnd)
         .filter((savedReport) => Number.isFinite(savedReport.computedValues?.[name]?.manuallyCalculatedReviews))
         .sort((a, b) => dateValue(b.endDate) - dateValue(a.endDate));
-      const previousSameMonth = previousSameMonthReports[0];
-      const previousManual = previousSameMonth?.computedValues?.[name]?.manuallyCalculatedReviews;
-      const previousCollected = previousSameMonth?.computedValues?.[name]?.totalReviewsCollected;
+      const previousReport = previousReports[0];
+      const previousManual = previousReport?.computedValues?.[name]?.manuallyCalculatedReviews;
+      const previousMarker = previousReport?.computedValues?.[name]?.lastCountedReview;
+      const savedSnapshotManual = savedSnapshotKey && savedSnapshotKey === reportSelectionKey
+        ? reviewCounts[name]?.manualCalculatedReviews
+        : null;
+      const savedSnapshotMarker = savedSnapshotKey && savedSnapshotKey === reportSelectionKey
+        ? reviewCounts[name]?.lastCountedReview
+        : null;
 
       const asOfNow = Number.isFinite(googleTotalReviews) ? googleTotalReviews : null;
       const fallbackLastMonth = Number.isFinite(asOfNow) && Number.isFinite(googleCollected) ? asOfNow - googleCollected : null;
       const lastMonth = Number.isFinite(savedLastMonth) ? savedLastMonth : fallbackLastMonth;
-      const collected = Number.isFinite(googleCollected)
-        ? googleCollected
-        : lastMonth === null || asOfNow === null ? null : asOfNow - lastMonth;
-      const newSincePrevious = Number.isFinite(collected) && Number.isFinite(previousCollected)
-        ? Math.max(0, collected - previousCollected)
+      const collected = lastMonth === null || asOfNow === null
+        ? Number.isFinite(googleCollected) ? googleCollected : null
+        : asOfNow - lastMonth;
+      const currentMarkers = Array.isArray(reviewCounts[name]?.reviewMarkers) ? reviewCounts[name].reviewMarkers : [];
+      const currentLastMarker = currentMarkers.length ? currentMarkers[currentMarkers.length - 1] : null;
+      const fallbackPreviousMarker = previousReport && !previousMarker
+        ? endBoundaryMarker(previousReport.endDate)
         : null;
-      const manualCount = Number.isFinite(previousManual) && newSincePrevious !== null
+      const markerToCompare = previousMarker ?? fallbackPreviousMarker;
+      const newSincePrevious = markerToCompare
+        ? currentMarkers.filter((marker) => markerAfter(marker, markerToCompare)).length
+        : null;
+      const suggestedManualCount = Number.isFinite(previousManual) && newSincePrevious !== null
         ? previousManual + newSincePrevious
         : collected;
+      const manualCount = Number.isFinite(savedSnapshotManual) ? savedSnapshotManual : suggestedManualCount;
 
       metrics[name] = {
         lastMonth,
         asOfNow,
         collected,
         manualCount,
+        newSincePrevious,
+        lastCountedReview: savedSnapshotMarker ?? currentLastMarker,
         deleted: manualCount === null || collected === null ? null : manualCount - collected,
       };
     }
@@ -712,6 +748,9 @@ export default function ReviewCounterPage() {
         totalReviewsAsOfNow: report.metrics[name]?.asOfNow ?? null,
         totalReviewsCollected: report.metrics[name]?.collected ?? null,
         manuallyCalculatedReviews: report.metrics[name]?.manualCount ?? null,
+        actualReviewsSincePreviousReport: report.metrics[name]?.newSincePrevious ?? null,
+        lastCountedReview: report.metrics[name]?.lastCountedReview ?? null,
+        reviewMarkers: reviewCounts[name]?.reviewMarkers ?? [],
         deletedReviews: report.metrics[name]?.deleted ?? null,
         conversionRate: conversionRate(name),
         rating: performanceMetric(name, "rating"),
@@ -864,7 +903,7 @@ export default function ReviewCounterPage() {
   const reportBuilt = !counterLoading && selectedLocations.length > 0 && selectedLocations.every((location) =>
     Object.prototype.hasOwnProperty.call(reviewCounts, location.location_name)
   );
-  const reportReady = reportBuilt && !counterError;
+  const reportReady = reportBuilt;
   const reportBuilding = selectedLocations.length > 0 && !invalidRange && !reportReady;
 
 

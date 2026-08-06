@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   title: "GBP Manager",
-  description: "Google Business Profile management suite — rank tracking, reviews, posts & performance",
+  description: "Google Business Profile management suite â€” rank tracking, reviews, posts & performance",
 };
 
 export default function RootLayout({ children }) {
@@ -26,7 +26,7 @@ export default function RootLayout({ children }) {
     >
       <body className="min-h-full flex" suppressHydrationWarning>
         <Sidebar />
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="liquid-main flex-1 overflow-auto">{children}</main>
         <GeminiLiveChat />
       </body>
     </html>
