@@ -174,6 +174,7 @@ export default function AdminUsersPage() {
               const isSelf = user.id === me?.id;
               const canEditRole = canManageElevated;
               const canDisable = !isSelf && (canManageElevated ? user.role !== "super_admin" : user.role === "user");
+              const canDelete = canDisable;
               return (
                 <tr key={user.id}>
                   <td className="px-5 py-3 font-medium text-slate-700">{user.email}</td>
@@ -192,13 +193,22 @@ export default function AdminUsersPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <button
-                      disabled={!canDisable && user.is_active}
-                      onClick={() => updateUser(user.id, { is_active: !user.is_active })}
-                      className="text-xs font-semibold text-slate-600 hover:text-sky-600 disabled:text-slate-300 disabled:cursor-not-allowed"
-                    >
-                      {user.is_active ? "Disable" : "Reactivate"}
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        disabled={!canDisable && user.is_active}
+                        onClick={() => updateUser(user.id, { is_active: !user.is_active })}
+                        className="text-xs font-semibold text-slate-600 hover:text-sky-600 disabled:text-slate-300 disabled:cursor-not-allowed"
+                      >
+                        {user.is_active ? "Disable" : "Reactivate"}
+                      </button>
+                      <button
+                        disabled={!canDelete}
+                        onClick={() => deleteUser(user.id)}
+                        className="text-xs font-semibold text-red-500 hover:text-red-600 disabled:text-slate-300 disabled:cursor-not-allowed"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
