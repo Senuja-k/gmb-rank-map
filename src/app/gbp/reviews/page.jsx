@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 
 const AI_MODEL_KEY = "gbp_gemini_model";
@@ -101,6 +101,7 @@ export default function ReviewsPage() {
   const [modelUsage, setModelUsage] = useState({});
   const [showReviewCustomPrompt, setShowReviewCustomPrompt] = useState(false);
   const [reviewCustomPromptDraft, setReviewCustomPromptDraft] = useState("");
+  const reviewFetchIdRef = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -142,20 +143,32 @@ export default function ReviewsPage() {
     return () => clearInterval(id);
   }, [rateLimitUntil]);
 
-  const loadReviews = useCallback(async () => {
+  const loadReviews = useCallback(async ({ signal } = {}) => {
+    const fetchId = reviewFetchIdRef.current + 1;
+    reviewFetchIdRef.current = fetchId;
     setLoading(true); setError("");
     try {
-      const res = await fetch(`/api/gbp/reviews?view=${reviewView === "all" ? "all" : "unresponded"}`);
-      const data = await res.json();
+      const res = await fetch(`/api/gbp/reviews?view=${reviewView === "all" ? "all" : "unresponded"}`, { cache: "no-store", signal });
+      const data = await res.json().catch(() => ({}));
+      if (signal?.aborted || fetchId !== reviewFetchIdRef.current) return;
       if (!res.ok) throw new Error(data.error ?? "Failed to load reviews");
       setReviews(data.reviews ?? []);
       setFetchErrors(data.fetchErrors ?? []);
       setSelected(new Set());
-    } catch (err) { setError(err.message); setFetchErrors([]); }
-    finally { setLoading(false); }
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted || fetchId !== reviewFetchIdRef.current) return;
+      setError(err.message);
+      setFetchErrors([]);
+    } finally {
+      if (!signal?.aborted && fetchId === reviewFetchIdRef.current) setLoading(false);
+    }
   }, [reviewView]);
 
-  useEffect(() => { loadReviews(); }, [loadReviews]);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadReviews({ signal: controller.signal });
+    return () => controller.abort();
+  }, [loadReviews]);
 
   const locations = [...new Map(reviews.map((r) => [r.locationName, r.locationDisplayName])).entries()]
     .map(([locationName, displayName]) => ({ locationName, displayName }));
