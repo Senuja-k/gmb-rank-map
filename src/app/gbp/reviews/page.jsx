@@ -71,6 +71,16 @@ function formatDate(ts) {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function formatSeconds(seconds) {
+  return seconds >= 60
+    ? `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+    : `${seconds}s`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function ReviewsPage() {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +96,7 @@ export default function ReviewsPage() {
   const [autoResponding, setAutoResponding] = useState(false);
   const [autoProgress, setAutoProgress] = useState({ done: 0, total: 0 });
   const [autoErrors, setAutoErrors] = useState([]);
+  const [autoRateLimitReview, setAutoRateLimitReview] = useState("");
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [queueIndex, setQueueIndex] = useState(0);
@@ -223,27 +234,49 @@ export default function ReviewsPage() {
 
   async function handleAutoRespond() {
     if (!selectedReviews.length) return;
-    setAutoResponding(true); setAutoErrors([]); setAutoProgress({ done: 0, total: selectedReviews.length });
+    setAutoResponding(true); setAutoErrors([]); setAutoRateLimitReview(""); setAutoProgress({ done: 0, total: selectedReviews.length });
     for (let i = 0; i < selectedReviews.length; i++) {
       const review = selectedReviews[i];
-      try {
-        const res = await fetch("/api/gbp/reviews/reply", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: review.email, locationName: review.locationName, reviewId: review.name,
-            reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "",
-            customInstruction: instruction,
-            reviewPhotos: review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [],
-            geminiModel,
-            starRating: review.starRating,
-          }),
-        });
-        if (!res.ok) { const d = await res.json(); setAutoErrors((p) => [...p, `${review.reviewer?.displayName ?? "Review"}: ${d.error}`]); }
-        else { const c = persistIncrement(geminiModel); setModelUsage((p) => ({ ...p, [geminiModel]: c })); }
-      } catch (err) { setAutoErrors((p) => [...p, `${review.reviewer?.displayName ?? "Review"}: ${err.message}`]); }
+      const reviewLabel = review.reviewer?.displayName ?? "Review";
+      let answered = false;
+      while (!answered) {
+        try {
+          const res = await fetch("/api/gbp/reviews/reply", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: review.email, locationName: review.locationName, reviewId: review.name,
+              reviewerName: review.reviewer?.displayName ?? "Customer", reviewText: review.comment ?? "",
+              customInstruction: instruction,
+              reviewPhotos: review.reviewMediaItems?.map((m) => m.thumbnailUrl).filter(Boolean) ?? [],
+              geminiModel,
+              starRating: review.starRating,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 429) {
+            const secs = data.retryAfterSeconds ?? 60;
+            setAutoRateLimitReview(reviewLabel);
+            setRateLimitUntil(new Date(Date.now() + secs * 1000));
+            setRateLimitSecsLeft(secs);
+            await sleep(secs * 1000);
+            setAutoRateLimitReview("");
+            continue;
+          }
+          if (!res.ok) {
+            setAutoErrors((p) => [...p, `${reviewLabel}: ${data.error ?? "Failed to post reply"}`]);
+          } else {
+            const c = persistIncrement(geminiModel);
+            setModelUsage((p) => ({ ...p, [geminiModel]: c }));
+          }
+          answered = true;
+        } catch (err) {
+          setAutoErrors((p) => [...p, `${reviewLabel}: ${err.message}`]);
+          answered = true;
+        }
+      }
       setAutoProgress({ done: i + 1, total: selectedReviews.length });
     }
-    setAutoResponding(false); setSelected(new Set()); await loadReviews();
+    setAutoResponding(false); setAutoRateLimitReview(""); setSelected(new Set()); await loadReviews();
   }
 
   async function handleReviewAndRespond() {
@@ -335,9 +368,7 @@ export default function ReviewsPage() {
             <p className="text-xs text-amber-700 mt-0.5">
               You&apos;ve hit the free-tier limit (20 requests/day). You can generate again in{" "}
               <span className="font-bold tabular-nums">
-                {rateLimitSecsLeft >= 60
-                  ? `${Math.floor(rateLimitSecsLeft / 60)}m ${rateLimitSecsLeft % 60}s`
-                  : `${rateLimitSecsLeft}s`}
+                {formatSeconds(rateLimitSecsLeft)}
               </span>.
             </p>
           </div>
@@ -459,6 +490,20 @@ export default function ReviewsPage() {
         <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 space-y-1">
           <p className="text-xs font-semibold text-red-700">Some replies failed:</p>
           {autoErrors.map((e, i) => <p key={i} className="text-xs text-red-600">{e}</p>)}
+        </div>
+      )}
+
+      {autoResponding && autoRateLimitReview && rateLimitSecsLeft > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <svg className="w-4 h-4 text-amber-500 animate-spin shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <div>
+            <p className="text-xs font-semibold text-amber-800">Auto responder paused for Gemini rate limit</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Waiting {formatSeconds(rateLimitSecsLeft)} before retrying {autoRateLimitReview}. The selected queue will continue automatically.
+            </p>
+          </div>
         </div>
       )}
 
@@ -699,9 +744,7 @@ export default function ReviewsPage() {
                   <p className="text-xs text-amber-700">
                     Retry in{" "}
                     <span className="font-bold tabular-nums">
-                      {rateLimitSecsLeft >= 60
-                        ? `${Math.floor(rateLimitSecsLeft / 60)}m ${rateLimitSecsLeft % 60}s`
-                        : `${rateLimitSecsLeft}s`}
+                      {formatSeconds(rateLimitSecsLeft)}
                     </span>
                   </p>
                 </div>              ) : (

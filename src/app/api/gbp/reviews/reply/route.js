@@ -17,6 +17,15 @@
 import { NextResponse } from "next/server";
 import { handleReviewReply } from "@/lib/gbp";
 
+function geminiRetryAfterSeconds(err) {
+  const retryViolation = err.errorDetails?.find(
+    (d) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo"
+  );
+  const delayStr = retryViolation?.retryDelay ?? "";
+  const seconds = parseInt(delayStr, 10);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 60;
+}
+
 export async function POST(request) {
   let body;
   try {
@@ -55,8 +64,12 @@ export async function POST(request) {
     console.error("[GBP reviews/reply]", err);
 
     if (err.status === 429 || err.message?.includes("429")) {
+      const seconds = geminiRetryAfterSeconds(err);
       return NextResponse.json(
-        { error: "Gemini rate limit reached. Please wait before generating more replies." },
+        {
+          error: "Gemini rate limit reached. Please wait before generating more replies.",
+          retryAfterSeconds: seconds,
+        },
         { status: 429 }
       );
     }
