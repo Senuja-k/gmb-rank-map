@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -30,6 +30,23 @@ function formatDate(iso) {
   return `${date} ${time}`;
 }
 
+function monthKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(key) {
+  const [year, month] = key.split("-").map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString("en-US", {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function normalizeText(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function timeAgo(iso) {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -48,6 +65,7 @@ export default function HeatmapsListPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [selectedStore, setSelectedStore] = useState("");
 
   useEffect(() => {
     fetch("/api/scans")
@@ -59,23 +77,68 @@ export default function HeatmapsListPage() {
       .catch(() => setLoading(false));
   }, []);
 
+  const isInSelectedDateRange = (scan) => {
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      if (new Date(scan.createdAt) < from) return false;
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      if (new Date(scan.createdAt) > to) return false;
+    }
+    return true;
+  };
+
   const filtered = scans.filter((s) => {
     const matchesSearch =
       s.businessName.toLowerCase().includes(search.toLowerCase()) ||
       s.keyword.toLowerCase().includes(search.toLowerCase());
     if (!matchesSearch) return false;
-    if (dateFrom) {
-      const from = new Date(dateFrom);
-      from.setHours(0, 0, 0, 0);
-      if (new Date(s.createdAt) < from) return false;
-    }
-    if (dateTo) {
-      const to = new Date(dateTo);
-      to.setHours(23, 59, 59, 999);
-      if (new Date(s.createdAt) > to) return false;
-    }
-    return true;
+    return isInSelectedDateRange(s);
   });
+
+  const storeOptions = Array.from(
+    new Set(scans.map((scan) => scan.businessName).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+
+  const comparisonSource = scans.filter(
+    (scan) => selectedStore && scan.businessName === selectedStore && isInSelectedDateRange(scan)
+  );
+
+  const comparisonMonths = Array.from(
+    new Set(comparisonSource.map((scan) => monthKey(scan.createdAt)))
+  ).sort();
+
+  const comparisonRows = Array.from(
+    comparisonSource.reduce((map, scan) => {
+      const key = normalizeText(scan.keyword);
+      const row = map.get(key) ?? { keyword: scan.keyword, monthRanks: {} };
+      const month = monthKey(scan.createdAt);
+      const existing = row.monthRanks[month];
+
+      // If more than one scan exists for the same keyword in a month, show the latest scan's average.
+      if (!existing || new Date(scan.createdAt) > new Date(existing.createdAt)) {
+        row.monthRanks[month] = {
+          avgRank: scan.avgRank,
+          createdAt: scan.createdAt,
+          id: scan.id,
+        };
+      }
+
+      map.set(key, row);
+      return map;
+    }, new Map()).values()
+  )
+    .filter((row) => (
+      comparisonMonths.length < 2 ||
+      comparisonMonths.every((month) => row.monthRanks[month])
+    ))
+    .sort((a, b) => a.keyword.localeCompare(b.keyword));
+
+  const firstComparisonMonth = comparisonMonths[0];
+  const lastComparisonMonth = comparisonMonths[comparisonMonths.length - 1];
 
   const totalScans = filtered.length;
   const overallAvgRank =
@@ -128,6 +191,119 @@ export default function HeatmapsListPage() {
         </div>
       </div>
 
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-7">
+        <div className="flex items-center gap-4 px-6 py-5 border-b border-slate-200 bg-slate-50/70 flex-wrap">
+          <div>
+            <h2 className="text-base font-bold text-[#1a2b4a]">Monthly Keyword Comparison</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Average rank by keyword for the selected store and date range</p>
+          </div>
+          <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
+            <label className="text-xs text-slate-400 font-medium">Store</label>
+            <select
+              value={selectedStore}
+              onChange={(e) => setSelectedStore(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-xl min-w-72 focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
+            >
+              <option value="">Select a store</option>
+              {storeOptions.map((store) => (
+                <option key={store} value={store}>
+                  {store}
+                </option>
+              ))}
+            </select>
+            <label className="text-xs text-slate-400 font-medium ml-2">From</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="px-2 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
+            />
+            <label className="text-xs text-slate-400 font-medium">To</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="px-2 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        {!selectedStore ? (
+          <div className="py-12 text-center text-slate-400 text-sm">Select a store to compare monthly keyword ranks.</div>
+        ) : comparisonRows.length === 0 ? (
+          <div className="py-12 text-center text-slate-400 text-sm">No scans found for this store in the selected period.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[720px] border-separate border-spacing-0">
+              <thead>
+                <tr className="bg-white text-left">
+                  <th className="sticky left-0 z-10 bg-white px-6 py-4 text-[11px] font-semibold uppercase tracking-wider text-slate-400 border-b border-r border-slate-200 min-w-80">
+                    Keyword
+                  </th>
+                  {comparisonMonths.map((month) => (
+                    <th key={month} className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wider text-slate-400 text-center border-b border-r border-slate-200 min-w-36">
+                      {monthLabel(month)}
+                    </th>
+                  ))}
+                  {comparisonMonths.length >= 2 && (
+                    <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wider text-slate-400 text-center border-b border-slate-200 min-w-32">Change</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {comparisonRows.map((row) => {
+                  const firstRank = row.monthRanks[firstComparisonMonth]?.avgRank;
+                  const lastRank = row.monthRanks[lastComparisonMonth]?.avgRank;
+                  const change = typeof firstRank === "number" && typeof lastRank === "number"
+                    ? Number((firstRank - lastRank).toFixed(2))
+                    : null;
+                  const changeClass = change > 0
+                    ? "text-emerald-600"
+                    : change < 0
+                      ? "text-red-500"
+                      : "text-slate-400";
+
+                  return (
+                    <tr key={row.keyword} className="group hover:bg-sky-50/50 transition-colors">
+                      <td className="sticky left-0 z-10 bg-white group-hover:bg-sky-50 px-6 py-4 font-semibold text-[#1a2b4a] min-w-80 border-b border-r border-slate-100">
+                        {row.keyword}
+                      </td>
+                      {comparisonMonths.map((month) => {
+                        const scan = row.monthRanks[month];
+                        return (
+                          <td key={month} className="px-5 py-4 text-center border-b border-r border-slate-100 bg-white/40 group-hover:bg-sky-50/50">
+                            {scan ? (
+                              <Link href={`/heatmap/${scan.id}`} className={rankBadgeClass(scan.avgRank)}>
+                                {scan.avgRank}
+                              </Link>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      {comparisonMonths.length >= 2 && (
+                        <td className={`px-5 py-4 text-center font-semibold border-b border-slate-100 bg-white/40 group-hover:bg-sky-50/50 ${changeClass}`}>
+                          {change === null ? "-" : change > 0 ? `+${change}` : change}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Table card */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Toolbar */}
@@ -138,7 +314,7 @@ export default function HeatmapsListPage() {
             </svg>
             <input
               type="text"
-              placeholder="Search by name or keyword…"
+              placeholder="Search by name or keywordâ€¦"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-xl w-64 focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
@@ -172,12 +348,12 @@ export default function HeatmapsListPage() {
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-slate-400 text-sm">Loading…</div>
+          <div className="py-16 text-center text-slate-400 text-sm">Loadingâ€¦</div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center">
             <p className="text-slate-400 text-sm mb-3">No scans found</p>
             <Link href="/new" className="text-sky-500 hover:text-sky-600 text-sm font-medium">
-              Create your first scan →
+              Create your first scan â†’
             </Link>
           </div>
         ) : (
@@ -215,7 +391,7 @@ export default function HeatmapsListPage() {
                     <span className={top3BadgeClass(scan.top3Pct)}>{scan.top3Pct}%</span>
                   </td>
                   <td className="px-5 py-3.5 text-center text-slate-500 text-[13px]">
-                    {scan.gridSize}×{scan.gridSize}
+                    {scan.gridSize}Ã—{scan.gridSize}
                   </td>
                 </tr>
               ))}
@@ -232,3 +408,4 @@ export default function HeatmapsListPage() {
     </div>
   );
 }
+
