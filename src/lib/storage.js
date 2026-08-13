@@ -1,6 +1,6 @@
 import { createAdminClient } from "./supabase-server";
 
-// ── Public API ──────────────────────────────────────────────────────────────
+// â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -11,7 +11,7 @@ export function buildCompetitorSummaries(gridPoints, targetPlaceId) {
 
   for (const point of gridPoints) {
     for (const comp of point.competitors) {
-      if (comp.placeId === targetPlaceId) continue;
+      if (comp.placeId === targetPlaceId || comp.isTarget) continue;
       if (!map.has(comp.placeId)) {
         map.set(comp.placeId, { 
           name: comp.name, 
@@ -107,7 +107,7 @@ export async function deleteScan(id) {
   return (data ?? []).length > 0;
 }
 
-// ── Map DB columns (snake_case) → app format (camelCase) ────────────────────
+// â”€â”€ Map DB columns (snake_case) â†’ app format (camelCase) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function toAppScan(row) {
   return {
     id: row.id,

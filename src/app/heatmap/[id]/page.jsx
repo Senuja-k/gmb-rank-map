@@ -4,8 +4,10 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
-function rankBg(rank) {
+// Helpers
+function rankBg(rank, status = "ok") {
+  if (status === "api_error") return "#7c2d12";
+  if (status === "zero_results") return "#6b7280";
   if (rank >= 1 && rank <= 3) return "#4caf50";
   if (rank >= 4 && rank <= 10) return "#ff9800";
   if (rank >= 11 && rank <= 20) return "#f44336";
@@ -13,6 +15,7 @@ function rankBg(rank) {
 }
 
 function rankBadgeClass(rank) {
+  if (typeof rank !== "number") return "rank-badge rank-red";
   if (rank <= 5) return "rank-badge rank-green";
   if (rank <= 13) return "rank-badge rank-orange";
   return "rank-badge rank-red";
@@ -43,13 +46,32 @@ function findPointBusinessRank(point, activeBusinessKey) {
 }
 
 function formatRank(rank) {
+  if (typeof rank !== "number") return "-";
   return rank > 20 ? "20+" : rank;
+}
+
+function pointStatus(point) {
+  return point?.status || "ok";
+}
+
+function formatPointLabel(point, rank) {
+  const status = pointStatus(point);
+  if (status === "api_error") return "ERR";
+  if (status === "zero_results") return "0";
+  return String(formatRank(rank));
+}
+
+function formatPointStatus(point, rank) {
+  const status = pointStatus(point);
+  if (status === "api_error") return `API Error${point.httpStatus ? ` ${point.httpStatus}` : ""}`;
+  if (status === "zero_results") return "Zero Results";
+  return rank > 20 ? "Not Ranking" : "Ranking";
 }
 function buildCompetitorSummaries(gridPoints, targetPlaceId) {
   const map = new Map();
   for (const point of gridPoints) {
     for (const comp of point.competitors || []) {
-      if (comp.placeId === targetPlaceId) continue;
+      if (comp.placeId === targetPlaceId || comp.isTarget) continue;
       const key = businessKey(comp);
       if (!key) continue;
       if (!map.has(key)) {
@@ -105,7 +127,7 @@ export default function HeatmapDetailPage({ params }) {
   const markersRef = useRef([]);
   const [mapsLoaded, setMapsLoaded] = useState(() => typeof window !== "undefined" && Boolean(window.google?.maps));
 
-  // ── Fetch scan data ───────────────────────────────────────────────────────
+  // Fetch scan data
   useEffect(() => {
     fetch(`/api/scans/${encodeURIComponent(id)}`)
       .then((r) => {
@@ -122,7 +144,7 @@ export default function HeatmapDetailPage({ params }) {
       });
   }, [id]);
 
-  // ── Load Google Maps ──────────────────────────────────────────────────────
+  // Load Google Maps
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (mapsLoaded) return;
@@ -152,7 +174,7 @@ export default function HeatmapDetailPage({ params }) {
     document.head.appendChild(script);
   }, [mapsLoaded]);
 
-  // ── Render map with grid overlay ──────────────────────────────────────────
+  // Render map with grid overlay
   useEffect(() => {
     if (!mapsLoaded || !scan || !mapContainerRef.current) return;
     if (!window.google?.maps) return;
@@ -177,8 +199,9 @@ export default function HeatmapDetailPage({ params }) {
     // Add grid markers
     scan.gridPoints.forEach((point, pointIndex) => {
       const rank = findPointBusinessRank(point, selectedBusinessKey);
-      const bg = hideColors ? "#9e9e9e" : rankBg(rank);
-      const label = String(formatRank(rank));
+      const status = pointStatus(point);
+      const bg = hideColors ? "#9e9e9e" : rankBg(rank, status);
+      const label = formatPointLabel(point, rank);
       const isSelected = selectedPointIndex === pointIndex;
 
       const markerContent = document.createElement("div");
@@ -190,7 +213,7 @@ export default function HeatmapDetailPage({ params }) {
         : "";
       markerContent.style.transform = isSelected ? "scale(1.12)" : "";
       markerContent.textContent = label;
-      markerContent.title = `Point ${pointIndex + 1}: rank ${label}`;
+      markerContent.title = `Point ${pointIndex + 1}: ${formatPointStatus(point, rank)}`;
       markerContent.addEventListener("click", () => setSelectedPointIndex(pointIndex));
 
       try {
@@ -198,7 +221,7 @@ export default function HeatmapDetailPage({ params }) {
           map: mapRef.current,
           position: { lat: point.lat, lng: point.lng },
           content: markerContent,
-          title: `Point ${pointIndex + 1}: rank ${label}`,
+          title: `Point ${pointIndex + 1}: ${formatPointStatus(point, rank)}`,
           zIndex: isSelected ? 200 : 1,
         });
         marker.addListener?.("click", () => setSelectedPointIndex(pointIndex));
@@ -208,75 +231,23 @@ export default function HeatmapDetailPage({ params }) {
       }
     });
 
-    // Add competitor markers
-    if (scan.competitors && Array.isArray(scan.competitors)) {
-      scan.competitors.forEach((comp, idx) => {
-        // Only show competitors that have location data
-        if (comp.lat && comp.lng) {
-          const compMarkerEl = document.createElement("div");
-          compMarkerEl.style.cssText = `
-            width: 32px; height: 32px; border-radius: 50%;
-            background: #e91e63; border: 3px solid #fff;
-            box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer; font-size: 12px; font-weight: bold; color: #fff;
-          `;
-          compMarkerEl.textContent = idx + 1;
-          compMarkerEl.title = comp.name;
-
-          try {
-            const marker = new window.google.maps.marker.AdvancedMarkerElement({
-              map: mapRef.current,
-              position: { lat: comp.lat, lng: comp.lng },
-              content: compMarkerEl,
-              title: comp.name,
-              zIndex: 100,
-            });
-            markersRef.current.push(marker);
-          } catch {
-            // Fallback to standard marker
-            const marker = new window.google.maps.Marker({
-              map: mapRef.current,
-              position: { lat: comp.lat, lng: comp.lng },
-              title: comp.name,
-              icon: {
-                path: window.google.maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: "#e91e63",
-                fillOpacity: 1,
-                strokeColor: "#fff",
-                strokeWeight: 3,
-              },
-              zIndex: 100,
-            });
-            markersRef.current.push(marker);
-          }
-        }
-      });
-    }
-
     // Fit bounds
     const bounds = new window.google.maps.LatLngBounds();
     scan.gridPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
-    if (scan.competitors && Array.isArray(scan.competitors)) {
-      scan.competitors.forEach((c) => {
-        if (c.lat && c.lng) bounds.extend({ lat: c.lat, lng: c.lng });
-      });
-    }
     if (!mapRef.current.__boundsFit) {
       mapRef.current.fitBounds(bounds, 40);
       mapRef.current.__boundsFit = true;
     }
   }, [mapsLoaded, scan, hideColors, selectedPointIndex, selectedBusinessKey]);
 
-  // ── Delete handler ────────────────────────────────────────────────────────
+  // Delete handler
   const handleDelete = useCallback(async () => {
     if (!confirm("Delete this heatmap?")) return;
     await fetch(`/api/scans/${encodeURIComponent(id)}`, { method: "DELETE" });
     router.push("/");
   }, [id, router]);
 
-  // ── Loading / Error states ────────────────────────────────────────────────
+  // Loading / Error states
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -295,22 +266,26 @@ export default function HeatmapDetailPage({ params }) {
     );
   }
 
-  // ── Computed values ───────────────────────────────────────────────────────
+  // Computed values
   const gridArea = (scan.gridSize * scan.spacingKm) ** 2;
   const betweenPoints = scan.spacingKm * 1000;
-  const displayCompetitors = buildCompetitorSummaries(scan.gridPoints, scan.placeId);
+  const displayCompetitors = buildCompetitorSummaries(scan.gridPoints.filter((point) => pointStatus(point) === "ok"), scan.placeId);
   const activeBusiness = selectedBusinessKey
     ? displayCompetitors.find((comp) => businessKey(comp) === selectedBusinessKey)
     : null;
   const activeBusinessName = activeBusiness?.name || scan.businessName;
   const activePlaceId = activeBusiness?.placeId || scan.placeId;
-  const activePointRanks = scan.gridPoints.map((point) => findPointBusinessRank(point, selectedBusinessKey));
+  const validPoints = scan.gridPoints.filter((point) => pointStatus(point) === "ok");
+  const activePointRanks = validPoints.map((point) => findPointBusinessRank(point, selectedBusinessKey));
   const top3Count = activePointRanks.filter((rank) => rank <= 3).length;
   const notRankingCount = activePointRanks.filter((rank) => rank > 20).length;
+  const failedPointCount = scan.gridPoints.filter((point) => pointStatus(point) === "api_error").length;
+  const zeroResultCount = scan.gridPoints.filter((point) => pointStatus(point) === "zero_results").length;
   const selectedPoint = selectedPointIndex === null ? null : scan.gridPoints[selectedPointIndex];
   const selectedPointRank = selectedPoint ? findPointBusinessRank(selectedPoint, selectedBusinessKey) : null;
   const selectedPointCompetitors = selectedPoint?.competitors ?? [];
   const selectedPointTop3 = selectedPointRank !== null && selectedPointRank <= 3;
+  const selectedPointStatus = selectedPoint ? formatPointStatus(selectedPoint, selectedPointRank) : null;
 
   const competitorsWithPosition = displayCompetitors.map((c, i) => ({
     ...c,
@@ -383,12 +358,12 @@ export default function HeatmapDetailPage({ params }) {
           <div className="flex gap-6 text-center">
             <div>
               <p className="text-xs text-slate-400 mb-1">{selectedPoint ? "Point Ranking" : "Avg Ranking"}</p>
-              <span className={rankBadgeClass(displayRank)}>{formatRank(displayRank)}</span>
+              <span className={rankBadgeClass(displayRank)}>{selectedPoint && pointStatus(selectedPoint) !== "ok" ? formatPointLabel(selectedPoint, displayRank) : formatRank(displayRank)}</span>
             </div>
             <div>
               <p className="text-xs text-slate-400 mb-1">{selectedPoint ? "Point Top 3" : "Top 3%"}</p>
               <span className={top3BadgeClass(displayTop3Pct)}>
-                {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${displayTop3Pct}%`}
+                {selectedPoint && pointStatus(selectedPoint) !== "ok" ? "-" : selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : `${displayTop3Pct}%`}
               </span>
             </div>
           </div>
@@ -409,7 +384,7 @@ export default function HeatmapDetailPage({ params }) {
             </div>
             <div className="flex gap-2">
               <span className="text-slate-400">Area:</span>
-              <span>{gridArea.toFixed(2)} km²</span>
+              <span>{gridArea.toFixed(2)} km2</span>
             </div>
             <div className="flex gap-2">
               <span className="text-slate-400">Grid Size:</span>
@@ -479,15 +454,15 @@ export default function HeatmapDetailPage({ params }) {
                 </td>
                 <td className="px-3 py-2.5 text-center">
                   <span className={rankBadgeClass(targetDisplayRank)}>
-                    {formatRank(targetDisplayRank)}
+                    {selectedPoint && pointStatus(selectedPoint) !== "ok" ? formatPointLabel(selectedPoint, targetDisplayRank) : formatRank(targetDisplayRank)}
                   </span>
                 </td>
                 <td className="px-3 py-2.5 text-center text-slate-500">
-                  {selectedPoint ? formatRank(targetDisplayRank) : "-"}
+                  {selectedPoint ? (pointStatus(selectedPoint) !== "ok" ? formatPointLabel(selectedPoint, targetDisplayRank) : formatRank(targetDisplayRank)) : "-"}
                 </td>
                 <td className="px-3 py-2.5 text-center">
                   <span className={top3BadgeClass(targetDisplayTop3Pct)}>
-                    {selectedPoint ? (targetDisplayRank <= 3 ? "Yes" : "No") : `${scan.top3Pct}%`}
+                    {selectedPoint && pointStatus(selectedPoint) !== "ok" ? "-" : selectedPoint ? (targetDisplayRank <= 3 ? "Yes" : "No") : `${scan.top3Pct}%`}
                   </span>
                 </td>
               </tr>
@@ -607,27 +582,35 @@ export default function HeatmapDetailPage({ params }) {
               <span className="w-3 h-3 rounded" style={{ background: "#9e9e9e" }} />
               Not ranking
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded" style={{ background: "#7c2d12" }} />
+              API error
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded" style={{ background: "#6b7280" }} />
+              Zero results
+            </div>
           </div>
         </div>
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-6">
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
             {selectedPoint ? "Point Rank" : "Avg Rank"}
           </p>
-          <p className="text-2xl font-bold text-[#1a2b4a]">{formatRank(displayRank)}</p>
+          <p className="text-2xl font-bold text-[#1a2b4a]">{selectedPoint && pointStatus(selectedPoint) !== "ok" ? formatPointLabel(selectedPoint, displayRank) : formatRank(displayRank)}</p>
         </div>
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
             {selectedPoint ? "Point Top 3" : "Top 3 Points"}
           </p>
           <p className="text-2xl font-bold text-green-600">
-            {selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : top3Count}
+            {selectedPoint && pointStatus(selectedPoint) !== "ok" ? "-" : selectedPoint ? (selectedPointTop3 ? "Yes" : "No") : top3Count}
             {!selectedPoint && (
               <span className="text-base text-slate-400 font-normal">
-                /{scan.totalPoints}
+                /{validPoints.length}
               </span>
             )}
           </p>
@@ -645,8 +628,13 @@ export default function HeatmapDetailPage({ params }) {
             {selectedPoint ? "Point Status" : "Not Ranking"}
           </p>
           <p className="text-2xl font-bold text-red-500">
-            {selectedPoint ? (selectedPointRank > 20 ? "Not Ranking" : "Ranking") : notRankingCount}
+            {selectedPoint ? selectedPointStatus : notRankingCount}
           </p>
+        </div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider">Scan Issues</p>
+          <p className="text-2xl font-bold text-[#1a2b4a]">{failedPointCount + zeroResultCount}</p>
+          <p className="text-xs text-slate-400 mt-1">{failedPointCount} err / {zeroResultCount} zero</p>
         </div>
       </div>
     </div>
