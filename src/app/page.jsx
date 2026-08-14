@@ -10,6 +10,17 @@ const VIEW_METRICS = new Set([
   "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
 ]);
 const INTERACTION_METRICS = new Set(["WEBSITE_CLICKS", "CALL_CLICKS", "BUSINESS_DIRECTION_REQUESTS"]);
+const DEFAULT_CHART_METRIC = "BUSINESS_IMPRESSIONS_MOBILE_SEARCH";
+const ALL_CHART_LOCATIONS = "__all__";
+const METRIC_LABELS = {
+  WEBSITE_CLICKS: "Website Clicks",
+  CALL_CLICKS: "Call Clicks",
+  BUSINESS_IMPRESSIONS_DESKTOP_MAPS: "Desktop Maps Impressions",
+  BUSINESS_IMPRESSIONS_DESKTOP_SEARCH: "Desktop Search Impressions",
+  BUSINESS_IMPRESSIONS_MOBILE_MAPS: "Mobile Maps Impressions",
+  BUSINESS_IMPRESSIONS_MOBILE_SEARCH: "Mobile Search Impressions",
+  BUSINESS_DIRECTION_REQUESTS: "Direction Requests",
+};
 
 function formatInputDate(date) {
   return date.toISOString().slice(0, 10);
@@ -38,6 +49,73 @@ function sumSeries(row) {
   return (row.timeSeries?.datedValues ?? []).reduce((sum, point) => sum + Number(point.value ?? 0), 0);
 }
 
+function dateKeyFromParts(date) {
+  const year = String(date.year).padStart(4, "0");
+  const month = String(date.month).padStart(2, "0");
+  const day = String(date.day).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function monthKeyFromParts(date) {
+  const year = String(date.year).padStart(4, "0");
+  const month = String(date.month).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonths(date, months) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months, 1);
+  return next;
+}
+
+function formatBucketLabel(key, bucketMode) {
+  if (bucketMode === "day") {
+    const date = new Date(`${key}T00:00:00`);
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+  const date = new Date(`${key}-01T00:00:00`);
+  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+function getInclusiveDayCount(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  return Math.max(1, Math.round((end - start) / 86400000) + 1);
+}
+
+function buildChartBuckets(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  const dayCount = getInclusiveDayCount(startDate, endDate);
+  const bucketMode = dayCount <= 31 ? "day" : "month";
+  const buckets = [];
+
+  if (bucketMode === "day") {
+    for (let cursor = start; cursor <= end; cursor = addDays(cursor, 1)) {
+      const key = formatInputDate(cursor);
+      buckets.push({ key, label: formatBucketLabel(key, bucketMode), value: 0 });
+    }
+  } else {
+    for (let cursor = new Date(start.getFullYear(), start.getMonth(), 1); cursor <= end; cursor = addMonths(cursor, 1)) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+      buckets.push({ key, label: formatBucketLabel(key, bucketMode), value: 0 });
+    }
+  }
+
+  return { bucketMode, buckets };
+}
+
+function makeChartPath(points) {
+  if (!points.length) return "";
+  return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+}
+
 function buildPerformanceUrl(location, start, end) {
   const from = dateParts(start);
   const to = dateParts(end);
@@ -58,6 +136,8 @@ export default function DashboardPage() {
   const [locations, setLocations] = useState([]);
   const [performanceRows, setPerformanceRows] = useState([]);
   const [dateRange, setDateRange] = useState(() => defaultDateRange());
+  const [chartMetric, setChartMetric] = useState(DEFAULT_CHART_METRIC);
+  const [chartLocation, setChartLocation] = useState(ALL_CHART_LOCATIONS);
   const [loading, setLoading] = useState(true);
   const [performanceError, setPerformanceError] = useState("");
 
@@ -181,10 +261,89 @@ export default function DashboardPage() {
     [performanceRows],
   );
 
+  const availableMetrics = useMemo(() => {
+    const metrics = new Set([DEFAULT_CHART_METRIC]);
+    for (const location of performanceRows) {
+      for (const row of location.rows) {
+        metrics.add(row.dailyMetric);
+      }
+    }
+    return [...metrics].sort((a, b) => (METRIC_LABELS[a] ?? a).localeCompare(METRIC_LABELS[b] ?? b));
+  }, [performanceRows]);
+
+  const chartLocationOptions = useMemo(
+    () =>
+      performanceRows.map((locationData) => ({
+        value: locationData.location.location_name,
+        label: locationData.location.display_name || locationData.location.location_name,
+      })),
+    [performanceRows],
+  );
+
+  const chartData = useMemo(() => {
+    const { bucketMode, buckets } = buildChartBuckets(dateRange.startDate, dateRange.endDate);
+    const values = new Map(buckets.map((bucket) => [bucket.key, 0]));
+
+    for (const location of performanceRows) {
+      if (chartLocation !== ALL_CHART_LOCATIONS && location.location.location_name !== chartLocation) continue;
+      for (const row of location.rows) {
+        if (row.dailyMetric !== chartMetric) continue;
+        for (const point of row.timeSeries?.datedValues ?? []) {
+          if (!point.date) continue;
+          const key = bucketMode === "day" ? dateKeyFromParts(point.date) : monthKeyFromParts(point.date);
+          if (values.has(key)) {
+            values.set(key, values.get(key) + Number(point.value ?? 0));
+          }
+        }
+      }
+    }
+
+    return {
+      bucketMode,
+      rows: buckets.map((bucket) => ({ ...bucket, value: values.get(bucket.key) ?? 0 })),
+    };
+  }, [chartLocation, chartMetric, dateRange.endDate, dateRange.startDate, performanceRows]);
+
+  const chartPoints = useMemo(() => {
+    const width = 760;
+    const height = 260;
+    const padding = { top: 18, right: 24, bottom: 34, left: 48 };
+    const innerWidth = width - padding.left - padding.right;
+    const innerHeight = height - padding.top - padding.bottom;
+    const maxValue = Math.max(1, ...chartData.rows.map((row) => row.value));
+    const yTicks = [...new Set([0, Math.round(maxValue / 2), maxValue])];
+    const points = chartData.rows.map((row, index) => {
+      const x = padding.left + (chartData.rows.length <= 1 ? innerWidth / 2 : (index / (chartData.rows.length - 1)) * innerWidth);
+      const y = padding.top + innerHeight - (row.value / maxValue) * innerHeight;
+      return { ...row, x, y };
+    });
+    const labelStep = Math.max(1, Math.ceil(points.length / 8));
+
+    return {
+      width,
+      height,
+      padding,
+      innerWidth,
+      innerHeight,
+      maxValue,
+      points,
+      linePath: makeChartPath(points),
+      areaPath: points.length
+        ? `${makeChartPath(points)} L ${points.at(-1).x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`
+        : "",
+      labelStep,
+      yTicks,
+    };
+  }, [chartData]);
 
   const totalSearches = [...searchKeywordTotals.values()].reduce((sum, value) => sum + value, 0);
   const maxLocationViews = Math.max(1, ...performanceByLocation.map((row) => row.views));
   const maxMetricTotal = Math.max(1, ...performanceMetricTotals.map((row) => row.total));
+  const chartTotal = chartData.rows.reduce((sum, row) => sum + row.value, 0);
+  const chartLocationLabel =
+    chartLocation === ALL_CHART_LOCATIONS
+      ? "All enabled locations"
+      : chartLocationOptions.find((location) => location.value === chartLocation)?.label ?? "Selected location";
 
   return (
     <div className="px-8 py-8 max-w-7xl">
@@ -244,6 +403,96 @@ export default function DashboardPage() {
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           {performanceError ? <div className="xl:col-span-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{performanceError}</div> : null}
+
+          <section className="xl:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-800">Metric Trend</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {chartData.bucketMode === "day" ? "Daily" : "Monthly"} values for the dashboard date range
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Location
+                  <select
+                    value={chartLocation}
+                    onChange={(event) => setChartLocation(event.target.value)}
+                    className="mt-1 block h-10 min-w-64 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-700 shadow-sm outline-none focus:border-sky-400"
+                  >
+                    <option value={ALL_CHART_LOCATIONS}>All enabled locations</option>
+                    {chartLocationOptions.map((location) => (
+                      <option key={location.value} value={location.value}>
+                        {location.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Metric
+                  <select
+                    value={chartMetric}
+                    onChange={(event) => setChartMetric(event.target.value)}
+                    className="mt-1 block h-10 min-w-64 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-700 shadow-sm outline-none focus:border-sky-400"
+                  >
+                    {availableMetrics.map((metric) => (
+                      <option key={metric} value={metric}>
+                        {METRIC_LABELS[metric] ?? metric.replaceAll("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="p-5">
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Selected Metric</p>
+                  <p className="text-lg font-bold text-[#1a2b4a]">{METRIC_LABELS[chartMetric] ?? chartMetric.replaceAll("_", " ")}</p>
+                  <p className="text-xs text-slate-400 mt-1">{chartLocationLabel}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Total</p>
+                  <p className="text-lg font-bold text-sky-600">{chartTotal.toLocaleString()}</p>
+                </div>
+              </div>
+              {chartData.rows.length ? (
+                <div className="overflow-x-auto">
+                  <svg viewBox={`0 0 ${chartPoints.width} ${chartPoints.height}`} role="img" aria-label={`${METRIC_LABELS[chartMetric] ?? chartMetric} trend`} className="h-72 min-w-[680px] w-full">
+                    <line x1={chartPoints.padding.left} y1={chartPoints.padding.top} x2={chartPoints.padding.left} y2={chartPoints.padding.top + chartPoints.innerHeight} stroke="#e2e8f0" />
+                    <line x1={chartPoints.padding.left} y1={chartPoints.padding.top + chartPoints.innerHeight} x2={chartPoints.padding.left + chartPoints.innerWidth} y2={chartPoints.padding.top + chartPoints.innerHeight} stroke="#e2e8f0" />
+                    {chartPoints.yTicks.map((value) => {
+                      const y = chartPoints.padding.top + chartPoints.innerHeight - (value / chartPoints.maxValue) * chartPoints.innerHeight;
+                      return (
+                        <g key={value}>
+                          <line x1={chartPoints.padding.left} y1={y} x2={chartPoints.padding.left + chartPoints.innerWidth} y2={y} stroke="#f1f5f9" />
+                          <text x={chartPoints.padding.left - 10} y={y + 4} textAnchor="end" className="fill-slate-400 text-[10px] font-semibold">
+                            {value.toLocaleString()}
+                          </text>
+                        </g>
+                      );
+                    })}
+                    <path d={chartPoints.areaPath} fill="#38bdf8" opacity="0.12" />
+                    <path d={chartPoints.linePath} fill="none" stroke="#0284c7" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                    {chartPoints.points.map((point, index) => (
+                      <g key={point.key}>
+                        <circle cx={point.x} cy={point.y} r="4" fill="#0284c7" stroke="#ffffff" strokeWidth="2">
+                          <title>{`${point.label}: ${point.value.toLocaleString()}`}</title>
+                        </circle>
+                        {index % chartPoints.labelStep === 0 || index === chartPoints.points.length - 1 ? (
+                          <text x={point.x} y={chartPoints.padding.top + chartPoints.innerHeight + 22} textAnchor="middle" className="fill-slate-400 text-[10px] font-semibold">
+                            {point.label}
+                          </text>
+                        ) : null}
+                      </g>
+                    ))}
+                  </svg>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-sm text-slate-400">No trend data loaded.</div>
+              )}
+            </div>
+          </section>
 
           <section className="xl:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100">
