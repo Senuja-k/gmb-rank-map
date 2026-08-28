@@ -230,6 +230,7 @@ function calculatePosCustomerCounts({
 }
 
 const MANUAL_ROWS = [
+  "manuallyCalculatedReviews",
   "chatClicks",
 ];
 
@@ -295,11 +296,12 @@ function hasUsableSavedMetrics(metrics) {
   return Number.isFinite(metrics.collected) && Number.isFinite(metrics.totalReviews);
 }
 
-function EditableCell({ value, onChange, className = "" }) {
+function EditableCell({ value, placeholder = "", onChange, className = "" }) {
   return (
     <td className={`border border-black p-0 ${className}`}>
       <input
         value={value ?? ""}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         className="h-full w-full min-w-20 bg-transparent px-1.5 py-0.5 text-right text-base outline-none focus:bg-white focus:ring-2 focus:ring-green-600"
         inputMode="decimal"
@@ -571,7 +573,12 @@ export default function ReviewCounterPage() {
       const suggestedManualCount = Number.isFinite(previousManual) && newSincePrevious !== null
         ? previousManual + newSincePrevious
         : collected;
-      const manualCount = Number.isFinite(savedSnapshotManual) ? savedSnapshotManual : suggestedManualCount;
+      const manualOverride = manualNumber("manuallyCalculatedReviews", name);
+      const manualCount = Number.isFinite(manualOverride)
+        ? manualOverride
+        : Number.isFinite(savedSnapshotManual)
+          ? savedSnapshotManual
+          : suggestedManualCount;
 
       metrics[name] = {
         lastMonth,
@@ -588,6 +595,8 @@ export default function ReviewCounterPage() {
   })();
 
   function updateManual(row, locationName, value) {
+    savedSnapshotKeyRef.current = "";
+    setSavedSnapshotKey("");
     setManualValues((prev) => ({
       ...prev,
       [row]: {
@@ -603,6 +612,11 @@ export default function ReviewCounterPage() {
 
   function manualNumber(row, locationName) {
     return numberValue(manual(row, locationName));
+  }
+
+  function manualOrCalculatedReviews(locationName) {
+    const value = manual("manuallyCalculatedReviews", locationName);
+    return value === "" ? displayNumber(report.metrics[locationName]?.manualCount) : value;
   }
 
   function totalCustomers(locationName) {
@@ -1208,9 +1222,9 @@ export default function ReviewCounterPage() {
             ) : reports.length === 0 ? (
               <p className="px-5 py-8 text-sm text-slate-400 text-center">No saved review reports yet.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="max-h-80 overflow-auto">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50">
+                  <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_0_rgb(226_232_240)]">
                     <tr>
                       <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Report</th>
                       <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Date Range</th>
@@ -1298,7 +1312,16 @@ export default function ReviewCounterPage() {
                   <tr>
                     <th className="border border-black bg-green-300 px-1.5 py-0.5 text-left font-normal">Manually Calculated Reviews</th>
                     {selectedLocations.map((location) => (
-                      <td key={location.location_name} className="border border-black bg-green-300 px-1.5 py-0.5 text-right tabular-nums font-bold">{counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.manualCount)}</td>
+                      counterLoading ? (
+                        <td key={location.location_name} className="border border-black bg-green-300 px-1.5 py-0.5 text-right tabular-nums font-bold">...</td>
+                      ) : (
+                        <EditableCell
+                          key={location.location_name}
+                          value={manualOrCalculatedReviews(location.location_name)}
+                          onChange={(value) => updateManual("manuallyCalculatedReviews", location.location_name, value)}
+                          className="bg-green-300 font-bold"
+                        />
+                      )
                     ))}
                   </tr>
                   <tr>
@@ -1343,7 +1366,16 @@ export default function ReviewCounterPage() {
                   <tr>
                     <th className="border border-black bg-neutral-100 px-1.5 py-0.5 text-left font-normal">Manually Calculated Reviews</th>
                     {selectedLocations.map((location) => (
-                      <td key={location.location_name} className="border border-black bg-green-300 px-1.5 py-0.5 text-right tabular-nums font-bold">{counterLoading ? "..." : displayNumber(report.metrics[location.location_name]?.manualCount)}</td>
+                      counterLoading ? (
+                        <td key={location.location_name} className="border border-black bg-green-300 px-1.5 py-0.5 text-right tabular-nums font-bold">...</td>
+                      ) : (
+                        <EditableCell
+                          key={location.location_name}
+                          value={manualOrCalculatedReviews(location.location_name)}
+                          onChange={(value) => updateManual("manuallyCalculatedReviews", location.location_name, value)}
+                          className="bg-green-300 font-bold"
+                        />
+                      )
                     ))}
                   </tr>
                   <tr>
