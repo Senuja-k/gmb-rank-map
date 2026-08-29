@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import ChessEasterEgg from "@/components/chess/ChessEasterEgg";
 
 const navItems = [
   {
@@ -120,8 +119,6 @@ export default function Sidebar() {
   const [budgetError, setBudgetError] = useState(false);
   const [activeKeyIndex, setActiveKeyIndex] = useState(() => getStoredKeyIndex());
   const [profile, setProfile] = useState(null);
-  const [isChessOpen, setIsChessOpen] = useState(false);
-  const logoClicksRef = useRef([]);
 
   const hiddenRoutes = ["/login"];
   const isHidden = hiddenRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"));
@@ -199,15 +196,6 @@ export default function Sidebar() {
     window.location.href = "/login";
   }
 
-  const handleLogoClick = useCallback(() => {
-    const now = Date.now();
-    logoClicksRef.current = [...logoClicksRef.current.filter((time) => now - time <= 3000), now];
-
-    if (logoClicksRef.current.length >= 5) {
-      logoClicksRef.current = [];
-      setIsChessOpen(true);
-    }
-  }, []);
 
   if (isHidden) return null;
 
@@ -217,10 +205,8 @@ export default function Sidebar() {
     >
       {/* Brand */}
       <div className="px-4 pt-5 pb-4">
-        <div
-          className="liquid-brand flex cursor-default items-center gap-3 rounded-2xl px-3 py-3"
-          onClick={handleLogoClick}
-        >
+        <div className="liquid-brand flex cursor-default items-center gap-3 rounded-2xl px-3 py-3">
+
           <div
             className="liquid-logo relative w-11 h-11 rounded-2xl flex items-center justify-center ring-1 ring-white/25 shrink-0 overflow-hidden"
           >
@@ -288,7 +274,7 @@ export default function Sidebar() {
           <div className="mx-4 h-px bg-white/6" />
           <div className="px-4 py-3">
             <p className="text-[9px] text-red-400 font-medium">
-              ? API Usage unavailable Ã¢â‚¬â€ run the Supabase migration
+              ? API Usage unavailable ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â run the Supabase migration
             </p>
           </div>
         </>
@@ -312,7 +298,7 @@ export default function Sidebar() {
                   <button
                     key={i}
                     onClick={() => switchKey(i)}
-                    title={`Key ${i + 1} Ã¢â‚¬â€ ${kb ? `${(kb.textSearchCalls + kb.nearbySearchCalls).toLocaleString()} / ${kb.totalFreeLimit.toLocaleString()}` : "unknown"}`}
+                    title={`Key ${i + 1} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${kb ? `${(kb.textSearchCalls + kb.nearbySearchCalls).toLocaleString()} / ${kb.totalFreeLimit.toLocaleString()}` : "unknown"}`}
                     className={`flex-1 py-1.5 rounded-md text-[10px] font-semibold transition-all flex flex-col items-center gap-0.5 ${
                       isActive
                         ? "bg-sky-500/25 text-sky-300 ring-1 ring-sky-500/50"
@@ -418,7 +404,7 @@ export default function Sidebar() {
           Powered by Google APIs &amp; Gemini
         </p>
       </div>
-      <ChessEasterEgg isOpen={isChessOpen} onClose={() => setIsChessOpen(false)} />
     </aside>
   );
 }
+
