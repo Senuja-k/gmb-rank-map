@@ -2,6 +2,7 @@
  * GET /api/gbp/reviews
  * Returns unresponded reviews from all saved+enabled GBP locations by default.
  * Pass ?view=all to include replied reviews too.
+ * Pass ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD to filter by review createTime.
  * Each review is augmented with locationName, locationDisplayName, and email.
  */
 import { NextResponse } from "next/server";
@@ -15,6 +16,21 @@ function timeoutAfter(ms, label) {
   return new Promise((_, reject) => {
     setTimeout(() => reject(new Error(`Timed out loading reviews for ${label}`)), ms);
   });
+}
+
+function parseDateBoundary(value, boundary) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const suffix = boundary === "end" ? "T23:59:59.999+05:30" : "T00:00:00.000+05:30";
+  const date = new Date(`${value}${suffix}`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isWithinDateRange(review, start, end) {
+  const createdAt = new Date(review.createTime ?? 0);
+  if (Number.isNaN(createdAt.getTime())) return false;
+  if (start && createdAt < start) return false;
+  if (end && createdAt > end) return false;
+  return true;
 }
 
 async function fetchLocationReviews(loc, onlyUnreplied) {
@@ -38,6 +54,16 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const view = searchParams.get("view") === "all" ? "all" : "unresponded";
+    const startDate = searchParams.get("startDate") ?? "";
+    const endDate = searchParams.get("endDate") ?? "";
+    const start = parseDateBoundary(startDate, "start");
+    const end = parseDateBoundary(endDate, "end");
+    if ((startDate && !start) || (endDate && !end)) {
+      return NextResponse.json({ error: "Dates must use YYYY-MM-DD format." }, { status: 400 });
+    }
+    if (start && end && start > end) {
+      return NextResponse.json({ error: "Start date must be before or equal to end date." }, { status: 400 });
+    }
     const onlyUnreplied = view !== "all";
     const supabase = createAdminClient();
     const { data: locations, error } = await supabase
@@ -57,13 +83,14 @@ export async function GET(request) {
 
     const reviews = results
       .filter(({ result }) => result.status === "fulfilled")
-      .flatMap(({ result }) => result.value);
+      .flatMap(({ result }) => result.value)
+      .filter((review) => (!start && !end) || isWithinDateRange(review, start, end));
 
     const fetchErrors = results
       .map(({ result, location }) => result.status === "rejected" ? `${location.display_name}: ${result.reason?.message ?? result.reason}` : null)
       .filter(Boolean);
 
-    return NextResponse.json({ view, reviews, fetchErrors: fetchErrors.length ? fetchErrors : undefined });
+    return NextResponse.json({ view, startDate, endDate, reviews, fetchErrors: fetchErrors.length ? fetchErrors : undefined });
   } catch (err) {
     console.error("[GBP reviews list]", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

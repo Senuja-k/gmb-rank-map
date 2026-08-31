@@ -87,6 +87,8 @@ export default function ReviewsPage() {
   const [error, setError] = useState("");
   const [fetchErrors, setFetchErrors] = useState([]);
   const [reviewView, setReviewView] = useState("unresponded");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [filter, setFilter] = useState("all");
   const [starFilter, setStarFilter] = useState(new Set());
   const [selected, setSelected] = useState(new Set());
@@ -158,8 +160,19 @@ export default function ReviewsPage() {
     const fetchId = reviewFetchIdRef.current + 1;
     reviewFetchIdRef.current = fetchId;
     setLoading(true); setError("");
+    if (startDate && endDate && startDate > endDate) {
+      setReviews([]);
+      setFetchErrors([]);
+      setSelected(new Set());
+      setError("Start date must be before or equal to end date.");
+      setLoading(false);
+      return;
+    }
     try {
-      const res = await fetch(`/api/gbp/reviews?view=${reviewView === "all" ? "all" : "unresponded"}`, { cache: "no-store", signal });
+      const params = new URLSearchParams({ view: reviewView === "all" ? "all" : "unresponded" });
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
+      const res = await fetch(`/api/gbp/reviews?${params}`, { cache: "no-store", signal });
       const data = await res.json().catch(() => ({}));
       if (signal?.aborted || fetchId !== reviewFetchIdRef.current) return;
       if (!res.ok) throw new Error(data.error ?? "Failed to load reviews");
@@ -173,7 +186,7 @@ export default function ReviewsPage() {
     } finally {
       if (!signal?.aborted && fetchId === reviewFetchIdRef.current) setLoading(false);
     }
-  }, [reviewView]);
+  }, [endDate, reviewView, startDate]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -183,6 +196,7 @@ export default function ReviewsPage() {
 
   const locations = [...new Map(reviews.map((r) => [r.locationName, r.locationDisplayName])).entries()]
     .map(([locationName, displayName]) => ({ locationName, displayName }));
+  const invalidDateRange = startDate && endDate && startDate > endDate;
   const locationFilteredReviews = filter === "all" ? reviews : reviews.filter((r) => r.locationName === filter);
   const viewFilteredReviews = reviewView === "long-unreplied"
     ? locationFilteredReviews.filter(isLongUnreplied)
@@ -433,6 +447,40 @@ export default function ReviewsPage() {
         >
           All Reviews
         </button>
+      </div>
+
+      <div className="flex items-end gap-3 flex-wrap rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-slate-500">Start date</span>
+          <input
+            type="date"
+            value={startDate}
+            max={endDate || undefined}
+            onChange={(event) => setStartDate(event.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-slate-500">End date</span>
+          <input
+            type="date"
+            value={endDate}
+            min={startDate || undefined}
+            onChange={(event) => setEndDate(event.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+          />
+        </label>
+        {(startDate || endDate) && (
+          <button
+            onClick={() => { setStartDate(""); setEndDate(""); }}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 underline"
+          >
+            Clear dates
+          </button>
+        )}
+        {invalidDateRange && (
+          <span className="text-xs font-medium text-red-600">Start date must be before end date.</span>
+        )}
       </div>
 
       {locations.length > 0 && (
