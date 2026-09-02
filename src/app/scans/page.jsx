@@ -137,7 +137,7 @@ export default function HeatmapsListPage() {
     ))
     .sort((a, b) => a.keyword.localeCompare(b.keyword));
 
-  const firstComparisonMonth = comparisonMonths[0];
+  const previousComparisonMonth = comparisonMonths[comparisonMonths.length - 2];
   const lastComparisonMonth = comparisonMonths[comparisonMonths.length - 1];
 
   const totalScans = filtered.length;
@@ -260,10 +260,10 @@ export default function HeatmapsListPage() {
               </thead>
               <tbody>
                 {comparisonRows.map((row) => {
-                  const firstRank = row.monthRanks[firstComparisonMonth]?.avgRank;
+                  const previousRank = row.monthRanks[previousComparisonMonth]?.avgRank;
                   const lastRank = row.monthRanks[lastComparisonMonth]?.avgRank;
-                  const change = typeof firstRank === "number" && typeof lastRank === "number"
-                    ? Number((firstRank - lastRank).toFixed(2))
+                  const change = typeof previousRank === "number" && typeof lastRank === "number"
+                    ? Number((previousRank - lastRank).toFixed(2))
                     : null;
                   const changeClass = change > 0
                     ? "text-emerald-600"
