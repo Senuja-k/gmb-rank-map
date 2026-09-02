@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 function rankBadgeClass(rank) {
@@ -66,6 +66,9 @@ export default function HeatmapsListPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedStore, setSelectedStore] = useState("");
+  const [selectedScanIds, setSelectedScanIds] = useState(new Set());
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     fetch("/api/scans")
@@ -98,6 +101,57 @@ export default function HeatmapsListPage() {
     if (!matchesSearch) return false;
     return isInSelectedDateRange(s);
   });
+
+  const visibleScanIds = useMemo(() => filtered.map((scan) => scan.id), [filtered]);
+  const selectedVisibleCount = visibleScanIds.filter((id) => selectedScanIds.has(id)).length;
+  const allVisibleSelected = visibleScanIds.length > 0 && selectedVisibleCount === visibleScanIds.length;
+
+  const toggleScanSelection = (scanId) => {
+    setSelectedScanIds((current) => {
+      const next = new Set(current);
+      if (next.has(scanId)) next.delete(scanId);
+      else next.add(scanId);
+      return next;
+    });
+  };
+
+  const toggleVisibleSelection = () => {
+    setSelectedScanIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        visibleScanIds.forEach((id) => next.delete(id));
+      } else {
+        visibleScanIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const deleteSelectedScans = async () => {
+    const ids = Array.from(selectedScanIds);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected scan${ids.length === 1 ? "" : "s"}?`)) return;
+
+    setDeletingSelected(true);
+    setDeleteError("");
+    try {
+      const res = await fetch("/api/scans", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error ${res.status}`);
+      }
+      setScans((current) => current.filter((scan) => !selectedScanIds.has(scan.id)));
+      setSelectedScanIds(new Set());
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete selected scans.");
+    } finally {
+      setDeletingSelected(false);
+    }
+  };
 
   const storeOptions = Array.from(
     new Set(scans.map((scan) => scan.businessName).filter(Boolean))
@@ -344,8 +398,23 @@ export default function HeatmapsListPage() {
               </button>
             )}
           </div>
-          <span className="ml-auto text-xs text-slate-400">{filtered.length} scan{filtered.length !== 1 ? "s" : ""}</span>
+          {selectedScanIds.size > 0 && (
+            <button
+              onClick={deleteSelectedScans}
+              disabled={deletingSelected}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Delete Selected ({selectedScanIds.size})
+            </button>
+          )}
+          <span className={selectedScanIds.size > 0 ? "text-xs text-slate-400" : "ml-auto text-xs text-slate-400"}>{filtered.length} scan{filtered.length !== 1 ? "s" : ""}</span>
         </div>
+
+        {deleteError && (
+          <div className="px-5 py-3 border-b border-red-100 bg-red-50 text-sm text-red-600">
+            {deleteError}
+          </div>
+        )}
 
         {loading ? (
           <div className="py-16 text-center text-slate-400 text-sm">Loadingâ€¦</div>
@@ -360,6 +429,15 @@ export default function HeatmapsListPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-100 text-left">
+                <th className="w-12 px-5 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleVisibleSelection}
+                    className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-200"
+                    aria-label="Select all visible scans"
+                  />
+                </th>
                 <th className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Location</th>
                 <th className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
                 <th className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Keyword</th>
@@ -370,7 +448,16 @@ export default function HeatmapsListPage() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.map((scan) => (
-                <tr key={scan.id} className="hover:bg-sky-50/40 transition-colors cursor-pointer group">
+                <tr key={scan.id} className={`hover:bg-sky-50/40 transition-colors group ${selectedScanIds.has(scan.id) ? "bg-sky-50/50" : ""}`}>
+                  <td className="px-5 py-3.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedScanIds.has(scan.id)}
+                      onChange={() => toggleScanSelection(scan.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-200"
+                      aria-label={`Select scan ${scan.businessName} ${scan.keyword}`}
+                    />
+                  </td>
                   <td className="px-5 py-3.5">
                     <Link
                       href={`/heatmap/${scan.id}`}

@@ -156,6 +156,21 @@ export async function getScan(id) {
   return data ? toAppScan(data) : null;
 }
 
+/** Delete multiple scans by ID. Returns the deleted count. */
+export async function deleteScans(ids) {
+  const scanIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+  if (!scanIds.length) return 0;
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("scans")
+    .delete()
+    .in("id", scanIds)
+    .select("id");
+  if (error) throw new Error(`deleteScans: ${error.message}`);
+  return (data ?? []).length;
+}
+
 /** Delete a scan by ID. Returns true if deleted. */
 export async function deleteScan(id) {
   const supabase = createAdminClient();
