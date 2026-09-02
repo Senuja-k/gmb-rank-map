@@ -3,7 +3,7 @@ import { createScanJob, generateId, getLatestActiveScanJob } from "@/lib/storage
 import { assertScanBatchCanStart, assertScanCanStart, normalizeScanRequest, runScanJob } from "@/lib/scan-runner";
 
 export const runtime = "nodejs";
-export const maxDuration = 3600;
+export const maxDuration = 300;
 
 const activeJobs = globalThis.__rankMapActiveJobs ?? new Map();
 globalThis.__rankMapActiveJobs = activeJobs;
