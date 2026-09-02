@@ -72,67 +72,6 @@ export async function saveScan(scan) {
   if (error) throw new Error(`saveScan: ${error.message}`);
 }
 
-
-
-export async function createScanJob(job) {
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("scan_jobs").insert({
-    id: job.id,
-    status: "queued",
-    request: job.request,
-    total_points: job.totalPoints,
-    completed_points: 0,
-    total_keywords: job.totalKeywords,
-    completed_keywords: 0,
-    active_keyword: job.activeKeyword ?? "",
-    scan_ids: [],
-    error: null,
-    created_at: job.createdAt,
-    updated_at: job.createdAt,
-  });
-  if (error) throw new Error(`createScanJob: ${error.message}`);
-}
-
-export async function updateScanJob(id, updates) {
-  const supabase = createAdminClient();
-  const row = {
-    ...("status" in updates && { status: updates.status }),
-    ...("completedPoints" in updates && { completed_points: updates.completedPoints }),
-    ...("completedKeywords" in updates && { completed_keywords: updates.completedKeywords }),
-    ...("activeKeyword" in updates && { active_keyword: updates.activeKeyword }),
-    ...("scanIds" in updates && { scan_ids: updates.scanIds }),
-    ...("error" in updates && { error: updates.error }),
-    ...("finishedAt" in updates && { finished_at: updates.finishedAt }),
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await supabase.from("scan_jobs").update(row).eq("id", id);
-  if (error) throw new Error(`updateScanJob: ${error.message}`);
-}
-
-export async function getScanJob(id) {
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("scan_jobs")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw new Error(`getScanJob: ${error.message}`);
-  return data ? toAppScanJob(data) : null;
-}
-
-export async function getLatestActiveScanJob() {
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("scan_jobs")
-    .select("*")
-    .in("status", ["queued", "running"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`getLatestActiveScanJob: ${error.message}`);
-  return data ? toAppScanJob(data) : null;
-}
-
 /** List all scans (summary only, no heavy grid data). */
 export async function listScans() {
   const supabase = createAdminClient();
@@ -199,23 +138,5 @@ function toAppScan(row) {
     avgRank: row.avg_rank,
     top3Pct: row.top3_pct,
     totalPoints: row.total_points,
-  };
-}
-
-function toAppScanJob(row) {
-  return {
-    id: row.id,
-    status: row.status,
-    request: row.request,
-    totalPoints: row.total_points,
-    completedPoints: row.completed_points,
-    totalKeywords: row.total_keywords,
-    completedKeywords: row.completed_keywords,
-    activeKeyword: row.active_keyword,
-    scanIds: row.scan_ids ?? [],
-    error: row.error,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    finishedAt: row.finished_at,
   };
 }

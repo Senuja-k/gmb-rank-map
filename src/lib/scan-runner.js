@@ -1,5 +1,5 @@
 import { getAllBudgetStatuses, recordSpend, getBudgetStatus, API_KEY_COUNT } from "./budget";
-import { generateId, saveScan, updateScanJob } from "./storage";
+import { generateId, saveScan } from "./storage";
 
 const KM_PER_DEG_LAT = 111.32;
 const FIELD_MASK = "places.id,places.displayName,places.location";
@@ -326,26 +326,4 @@ export async function runSingleScan(request, onProgress) {
   };
   await saveScan(savedScan);
   return { scan: savedScan, budget: budgetStatus };
-}
-
-export async function runScanJob(jobId, requests) {
-  const scanIds = [];
-  let completedPointsAll = 0;
-  try {
-    await updateScanJob(jobId, { status: "running", error: null });
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests[i];
-      await updateScanJob(jobId, { activeKeyword: request.keyword || "(no keyword)", completedKeywords: i, scanIds });
-      const result = await runSingleScan(request, async ({ completedPoints }) => {
-        await updateScanJob(jobId, { completedPoints: completedPointsAll + completedPoints });
-      });
-      completedPointsAll += request.grid.length;
-      scanIds.push(result.scan.id);
-      await updateScanJob(jobId, { completedPoints: completedPointsAll, completedKeywords: i + 1, scanIds });
-    }
-    await updateScanJob(jobId, { status: "completed", completedPoints: completedPointsAll, completedKeywords: requests.length, scanIds, finishedAt: new Date().toISOString() });
-  } catch (err) {
-    await updateScanJob(jobId, { status: "failed", error: err.message ?? "Scan failed.", scanIds, finishedAt: new Date().toISOString() });
-    throw err;
-  }
 }

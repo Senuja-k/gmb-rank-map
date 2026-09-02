@@ -108,7 +108,6 @@ export default function NewScanPage() {
   // Scan state
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState("");
-  const [activeJob, setActiveJob] = useState(null);
   const [error, setError] = useState("");
 
   // Budget state
@@ -581,103 +580,58 @@ export default function NewScanPage() {
   };
 
   // â”€â”€ Run Scan (one per keyword) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const handleJobStatus = useCallback((job) => {
-    if (!job) return false;
-    setActiveJob(job);
-    const total = job.totalPoints || 0;
-    const done = job.completedPoints || 0;
-    const keywordPart = job.totalKeywords > 1
-      ? `Keyword ${Math.min(job.completedKeywords + 1, job.totalKeywords)}/${job.totalKeywords}: "${job.activeKeyword || "(no keyword)"}"`
-      : `Keyword: "${job.activeKeyword || "(no keyword)"}"`;
-    setProgress(`${keywordPart} - ${done.toLocaleString()}/${total.toLocaleString()} points complete. You can refresh or use another tab.`);
-
-    if (job.status === "completed") {
-      localStorage.removeItem("activeScanJobId");
-      setScanning(false);
-      const scanIds = job.scanIds || [];
-      if (scanIds.length === 1) router.push(`/heatmap/${scanIds[0]}`);
-      else router.push("/");
-      return true;
-    }
-
-    if (job.status === "failed") {
-      localStorage.removeItem("activeScanJobId");
-      setScanning(false);
-      setError(job.error || "Scan failed.");
-      return true;
-    }
-
-    return false;
-  }, [router]);
-
-  const pollScanJob = useCallback(async (jobId) => {
-    setScanning(true);
-    setError("");
-    let stopped = false;
-    while (!stopped) {
-      const res = await fetch(`/api/scan-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to load scan job status.");
-      }
-      const data = await res.json();
-      stopped = handleJobStatus(data.job);
-      if (!stopped) await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  }, [handleJobStatus]);
-
-  useEffect(() => {
-    const jobId = localStorage.getItem("activeScanJobId");
-    if (!jobId) return;
-    pollScanJob(jobId).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to resume scan job.");
-      setScanning(false);
-    });
-  }, [pollScanJob]);
-
   const runScan = useCallback(async (force = false) => {
     if (!place) return;
 
     const validKeywords = parseKeywords();
-
     const center = drawnShape ? drawnShape.center : { lat: place.lat, lng: place.lng };
     const pointsToScan = gridPoints.length > 0 ? gridPoints : null;
 
     setScanning(true);
-    setActiveJob(null);
     setError("");
-    setProgress("Starting background scan...");
+    const totalKeywords = validKeywords.length;
+    let lastScanId = null;
 
     try {
-      const res = await fetch("/api/scan-jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetPlaceId: place.placeId,
-          businessName: place.name,
-          keywords: validKeywords,
-          center,
-          gridSize,
-          spacingKm,
-          customGrid: pointsToScan,
-          force,
-          apiKeyIndex: activeKeyIndex,
-        }),
-      });
+      for (let i = 0; i < validKeywords.length; i++) {
+        const kw = validKeywords[i];
+        setProgress(`Scanning keyword ${i + 1}/${totalKeywords}: "${kw || "(no keyword)"}"`);
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Server error ${res.status}`);
+        const res = await fetch("/api/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetPlaceId: place.placeId,
+            businessName: place.name,
+            keyword: kw,
+            center,
+            gridSize,
+            spacingKm,
+            customGrid: pointsToScan,
+            force,
+            apiKeyIndex: activeKeyIndex,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Server error ${res.status} for keyword "${kw}"`);
+        }
+
+        const data = await res.json();
+        lastScanId = data.scan.id;
       }
 
-      const data = await res.json();
-      localStorage.setItem("activeScanJobId", data.jobId);
-      await pollScanJob(data.jobId);
+      if (totalKeywords > 1) {
+        router.push("/");
+      } else {
+        router.push(`/heatmap/${lastScanId}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed.");
       setScanning(false);
     }
-  }, [place, parseKeywords, gridSize, spacingKm, drawnShape, gridPoints, activeKeyIndex, pollScanJob]);
+  }, [place, parseKeywords, gridSize, spacingKm, drawnShape, gridPoints, router, activeKeyIndex]);
 
   const totalPoints = drawnShape ? gridPoints.length : gridSize * gridSize;
 
@@ -694,9 +648,6 @@ export default function NewScanPage() {
     : Infinity;
   const overBudget = totalScans > relevantRemaining;
   const overBy = totalScans - relevantRemaining;
-  const jobProgressPct = activeJob?.totalPoints
-    ? Math.min(100, Math.round(((activeJob.completedPoints || 0) / activeJob.totalPoints) * 100))
-    : 0;
 
   const handleRunScan = () => {
     if (overBudget) {
@@ -890,12 +841,9 @@ export default function NewScanPage() {
             {/* Scan progress */}
             {scanning && (
               <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <p className="text-sm text-slate-500">{progress}</p>
-                  {activeJob && <span className="text-xs font-semibold text-sky-600">{jobProgressPct}%</span>}
-                </div>
+                <p className="text-sm text-slate-500 mb-2">{progress}</p>
                 <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full bg-sky-500 transition-all" style={{ width: `${jobProgressPct}%` }} />
+                  <div className="h-full shimmer-bar rounded-full w-full" />
                 </div>
               </div>
             )}
@@ -939,7 +887,7 @@ export default function NewScanPage() {
                   : 'bg-sky-500 hover:bg-sky-600'
               }`}
             >
-              {scanning ? "Running in Background..." : overBudget ? "Run Scan (Over Limit)" : "Run Scan"}
+              {scanning ? "Scanning…" : overBudget ? "Run Scan (Over Limit)" : "Run Scan"}
             </button>
           </div>
         </div>
