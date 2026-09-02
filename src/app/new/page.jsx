@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-// ── Shape helpers ───────────────────────────────────────────────────────────
+// â”€â”€ Shape helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const KM_PER_DEG_LAT = 111.32;
 function kmPerDegLng(lat) {
   return 111.32 * Math.cos((lat * Math.PI) / 180);
@@ -77,7 +77,7 @@ function generateGridInShape(shape, shapeType, center, radiusKm, spacingKm) {
   return points;
 }
 
-// ── Main Page ───────────────────────────────────────────────────────────────
+// â”€â”€ Main Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function NewScanPage() {
   const router = useRouter();
 
@@ -93,7 +93,8 @@ export default function NewScanPage() {
 
   // Form
   const [place, setPlace] = useState(null);
-  const [keywords, setKeywords] = useState([""]);
+  const [keywordText, setKeywordText] = useState("");
+  const [keywordItems, setKeywordItems] = useState([]);
   const [gridSize, setGridSize] = useState(7);
   const [spacingKm, setSpacingKm] = useState(1);
 
@@ -107,6 +108,7 @@ export default function NewScanPage() {
   // Scan state
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState("");
+  const [activeJob, setActiveJob] = useState(null);
   const [error, setError] = useState("");
 
   // Budget state
@@ -114,7 +116,7 @@ export default function NewScanPage() {
   const [activeKeyIndex, setActiveKeyIndex] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // ── Sync activeKeyIndex from localStorage ─────────────────────────────────
+  // â”€â”€ Sync activeKeyIndex from localStorage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     const stored = parseInt(localStorage.getItem("activeApiKeyIndex") ?? "0", 10);
     setActiveKeyIndex(Number.isFinite(stored) ? stored : 0);
@@ -128,7 +130,7 @@ export default function NewScanPage() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // ── Fetch budget on mount ─────────────────────────────────────────────────
+  // â”€â”€ Fetch budget on mount â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     fetch("/api/budget")
       .then((r) => r.json())
@@ -136,7 +138,7 @@ export default function NewScanPage() {
       .catch(() => {});
   }, []);
 
-  // ── Load Google Maps ──────────────────────────────────────────────────────
+  // â”€â”€ Load Google Maps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.google?.maps) {
@@ -173,7 +175,7 @@ export default function NewScanPage() {
     document.head.appendChild(script);
   }, []);
 
-  // ── Init Autocomplete ─────────────────────────────────────────────────────
+  // â”€â”€ Init Autocomplete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Note: google.maps.places.Autocomplete is deprecated as of March 1, 2025
   // Consider migrating to the Places API v1 (places/autocomplete endpoint) or Google Places Web component
   useEffect(() => {
@@ -181,7 +183,7 @@ export default function NewScanPage() {
     if (!window.google?.maps?.places) return;
 
     try {
-      // Using deprecated Autocomplete — this will be removed in a future API version
+      // Using deprecated Autocomplete â€” this will be removed in a future API version
       // eslint-disable-next-line new-cap
       const autocomplete = new window.google.maps.places.Autocomplete(
         autocompleteInputRef.current,
@@ -205,7 +207,7 @@ export default function NewScanPage() {
     }
   }, [mapsLoaded]);
 
-  // ── Init Map ──────────────────────────────────────────────────────────────
+  // â”€â”€ Init Map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!mapsLoaded || !mapContainerRef.current) return;
     if (mapRef.current) return;
@@ -221,7 +223,7 @@ export default function NewScanPage() {
     });
   }, [mapsLoaded]);
 
-  // ── Center map & add business marker when place is selected ────────────
+  // â”€â”€ Center map & add business marker when place is selected â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!mapRef.current || !place) return;
     mapRef.current.setCenter({ lat: place.lat, lng: place.lng });
@@ -273,7 +275,7 @@ export default function NewScanPage() {
     }
   }, [place]);
 
-  // ── Setup shape drawing handlers ────────────────────────────────────────
+  // â”€â”€ Setup shape drawing handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Note: DrawingManager was removed from Maps JS API v3.65+
   // Using native google.maps.Polygon/Rectangle/Circle with event listeners
   useEffect(() => {
@@ -438,7 +440,7 @@ export default function NewScanPage() {
     };
   }, [mapsLoaded, isDrawing, shapeType, drawnShape, polygonVertices]);
 
-  // ── Generate grid preview when shape or grid config changes ───────────────
+  // â”€â”€ Generate grid preview when shape or grid config changes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!drawnShape) {
       setGridPoints([]);
@@ -456,7 +458,7 @@ export default function NewScanPage() {
     setGridPoints(pts);
   }, [drawnShape, spacingKm]);
 
-  // ── Render grid point markers on map ──────────────────────────────────────
+  // â”€â”€ Render grid point markers on map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     // Clear old markers
     gridMarkersRef.current.forEach((m) => m.setMap(null));
@@ -481,19 +483,23 @@ export default function NewScanPage() {
     });
   }, [gridPoints]);
 
-  // ── Keywords management ───────────────────────────────────────────────────
-  const addKeyword = () => setKeywords([...keywords, ""]);
-  const removeKeyword = (idx) => {
-    if (keywords.length <= 1) return;
-    setKeywords(keywords.filter((_, i) => i !== idx));
-  };
-  const updateKeyword = (idx, val) => {
-    const copy = [...keywords];
-    copy[idx] = val;
-    setKeywords(copy);
-  };
+  // â”€â”€ Keywords management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const parseKeywordText = useCallback((value) => (
+    value
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter(Boolean)
+  ), []);
 
-  // ── Shape drawing helper functions ────────────────────────────────────
+  const parseKeywords = useCallback(() => {
+    const parsed = keywordItems.length ? keywordItems : parseKeywordText(keywordText);
+    return parsed.length ? parsed : [""];
+  }, [keywordItems, keywordText, parseKeywordText]);
+
+  const commitKeywordText = useCallback(() => {
+    setKeywordItems(parseKeywordText(keywordText));
+  }, [keywordText, parseKeywordText]);
+
   const updateShapeFromOverlay = (type) => {
     if (!currentOverlayRef.current) return;
     
@@ -553,7 +559,7 @@ export default function NewScanPage() {
     }
   };
 
-  // ── Clear drawn shape ────────────────────────────────────────────────
+  // â”€â”€ Clear drawn shape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const clearShape = () => {
     if (currentOverlayRef.current) {
       if (currentOverlayRef.current.__listeners) {
@@ -574,78 +580,123 @@ export default function NewScanPage() {
     setGridPoints([]);
   };
 
-  // ── Run Scan (one per keyword) ────────────────────────────────────────────
+  // â”€â”€ Run Scan (one per keyword) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const handleJobStatus = useCallback((job) => {
+    if (!job) return false;
+    setActiveJob(job);
+    const total = job.totalPoints || 0;
+    const done = job.completedPoints || 0;
+    const keywordPart = job.totalKeywords > 1
+      ? `Keyword ${Math.min(job.completedKeywords + 1, job.totalKeywords)}/${job.totalKeywords}: "${job.activeKeyword || "(no keyword)"}"`
+      : `Keyword: "${job.activeKeyword || "(no keyword)"}"`;
+    setProgress(`${keywordPart} - ${done.toLocaleString()}/${total.toLocaleString()} points complete. You can refresh or use another tab.`);
+
+    if (job.status === "completed") {
+      localStorage.removeItem("activeScanJobId");
+      setScanning(false);
+      const scanIds = job.scanIds || [];
+      if (scanIds.length === 1) router.push(`/heatmap/${scanIds[0]}`);
+      else router.push("/");
+      return true;
+    }
+
+    if (job.status === "failed") {
+      localStorage.removeItem("activeScanJobId");
+      setScanning(false);
+      setError(job.error || "Scan failed.");
+      return true;
+    }
+
+    return false;
+  }, [router]);
+
+  const pollScanJob = useCallback(async (jobId) => {
+    setScanning(true);
+    setError("");
+    let stopped = false;
+    while (!stopped) {
+      const res = await fetch(`/api/scan-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load scan job status.");
+      }
+      const data = await res.json();
+      stopped = handleJobStatus(data.job);
+      if (!stopped) await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }, [handleJobStatus]);
+
+  useEffect(() => {
+    const jobId = localStorage.getItem("activeScanJobId");
+    if (!jobId) return;
+    pollScanJob(jobId).catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to resume scan job.");
+      setScanning(false);
+    });
+  }, [pollScanJob]);
+
   const runScan = useCallback(async (force = false) => {
     if (!place) return;
 
-    const validKeywords = keywords.map((k) => k.trim()).filter(Boolean);
-    if (validKeywords.length === 0) validKeywords.push("");
+    const validKeywords = parseKeywords();
 
-    // Determine center — use shape center if drawn, otherwise use place location
     const center = drawnShape ? drawnShape.center : { lat: place.lat, lng: place.lng };
     const pointsToScan = gridPoints.length > 0 ? gridPoints : null;
 
     setScanning(true);
+    setActiveJob(null);
     setError("");
-    const totalKeywords = validKeywords.length;
-    let lastScanId = null;
+    setProgress("Starting background scan...");
 
     try {
-      for (let i = 0; i < validKeywords.length; i++) {
-        const kw = validKeywords[i];
-        setProgress(`Scanning keyword ${i + 1}/${totalKeywords}: "${kw || "(no keyword)"}"`);
+      const res = await fetch("/api/scan-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetPlaceId: place.placeId,
+          businessName: place.name,
+          keywords: validKeywords,
+          center,
+          gridSize,
+          spacingKm,
+          customGrid: pointsToScan,
+          force,
+          apiKeyIndex: activeKeyIndex,
+        }),
+      });
 
-        const res = await fetch("/api/scan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            targetPlaceId: place.placeId,
-            businessName: place.name,
-            keyword: kw,
-            center,
-            gridSize,
-            spacingKm,
-            customGrid: pointsToScan,
-            force,
-            apiKeyIndex: activeKeyIndex,
-          }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || `Server error ${res.status} for keyword "${kw}"`);
-        }
-
-        const data = await res.json();
-        lastScanId = data.scan.id;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error ${res.status}`);
       }
 
-      // If multiple keywords, go to the list page; if single, go to the heatmap
-      if (totalKeywords > 1) {
-        router.push("/");
-      } else {
-        router.push(`/heatmap/${lastScanId}`);
-      }
+      const data = await res.json();
+      localStorage.setItem("activeScanJobId", data.jobId);
+      await pollScanJob(data.jobId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed.");
       setScanning(false);
     }
-  }, [place, keywords, gridSize, spacingKm, drawnShape, gridPoints, router, activeKeyIndex]);
+  }, [place, parseKeywords, gridSize, spacingKm, drawnShape, gridPoints, activeKeyIndex, pollScanJob]);
 
   const totalPoints = drawnShape ? gridPoints.length : gridSize * gridSize;
 
-  // ── Budget helpers ────────────────────────────────────────────────────────
-  const validKw = keywords.filter((k) => k.trim()).length || 1;
+  // â”€â”€ Budget helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const parsedKeywords = parseKeywords();
+  const validKw = parsedKeywords.filter((k) => k.trim()).length || 1;
   const totalScans = totalPoints * validKw;
-  const usesTextSearch = keywords.some((k) => k.trim().length > 0);
-  const activeBudget = budgets?.[activeKeyIndex] ?? null;
-  const relevantRemaining = activeBudget
-    ? usesTextSearch
-      ? activeBudget.textSearchRemaining
-      : activeBudget.nearbySearchRemaining
+  const usesTextSearch = parsedKeywords.some((k) => k.trim().length > 0);
+  const relevantRemaining = budgets
+    ? budgets.reduce(
+        (sum, budget) => sum + (usesTextSearch ? budget.textSearchRemaining : budget.nearbySearchRemaining),
+        0
+      )
     : Infinity;
   const overBudget = totalScans > relevantRemaining;
   const overBy = totalScans - relevantRemaining;
+  const jobProgressPct = activeJob?.totalPoints
+    ? Math.min(100, Math.round(((activeJob.completedPoints || 0) / activeJob.totalPoints) * 100))
+    : 0;
 
   const handleRunScan = () => {
     if (overBudget) {
@@ -715,7 +766,7 @@ export default function NewScanPage() {
                 {drawnShape && " (inside shape)"}
               </span>
               {drawnShape && (
-                <span className="text-xs text-green-600 font-medium">Area drawn ✓</span>
+                <span className="text-xs text-green-600 font-medium">Area drawn âœ“</span>
               )}
             </div>
           </div>
@@ -747,36 +798,33 @@ export default function NewScanPage() {
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
                 Keywords
               </label>
-              <div className="space-y-2">
-                {keywords.map((kw, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <input
-                      type="text"
-                      value={kw}
-                      onChange={(e) => updateKeyword(idx, e.target.value)}
-                      placeholder={`e.g. "cosmetics store near me"`}
-                      className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
-                    />
-                    {keywords.length > 1 && (
-                      <button
-                        onClick={() => removeKeyword(idx)}
-                        className="px-2 text-red-400 hover:text-red-600 text-lg leading-none"
-                        title="Remove keyword"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={addKeyword}
-                className="mt-2 text-xs text-sky-500 hover:text-sky-700 font-medium"
-              >
-                + Add another keyword
-              </button>
+              <textarea
+                value={keywordText}
+                onChange={(e) => {
+                  setKeywordText(e.target.value);
+                  setKeywordItems([]);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitKeywordText();
+                  }
+                }}
+                placeholder="ordinary products, cerave products, anua products"
+                rows={3}
+                className="w-full resize-none border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400"
+              />
+              {keywordItems.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {keywordItems.map((keyword, index) => (
+                    <span key={`${keyword}-${index}`} className="px-2 py-1 rounded-md bg-sky-50 text-sky-700 text-xs font-medium border border-sky-100">
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-slate-400 mt-1">
-                Each keyword will create a separate heatmap scan.
+                Paste comma-separated keywords, then press Enter to split them. Each keyword creates a separate heatmap scan.
               </p>
             </div>
 
@@ -791,12 +839,12 @@ export default function NewScanPage() {
                   onChange={(e) => setGridSize(Number(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-400 cursor-pointer"
                 >
-                  <option value={3}>3×3</option>
-                  <option value={5}>5×5</option>
-                  <option value={7}>7×7</option>
-                  <option value={9}>9×9</option>
-                  <option value={11}>11×11</option>
-                  <option value={13}>13×13</option>
+                  <option value={3}>3Ã—3</option>
+                  <option value={5}>5Ã—5</option>
+                  <option value={7}>7Ã—7</option>
+                  <option value={9}>9Ã—9</option>
+                  <option value={11}>11Ã—11</option>
+                  <option value={13}>13Ã—13</option>
                 </select>
               </div>
               <div>
@@ -822,13 +870,13 @@ export default function NewScanPage() {
 
             {/* Info */}
             <div className={`rounded-lg p-3 text-xs space-y-1 ${overBudget ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500'}`}>
-              <p><strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{totalPoints}</strong> {drawnShape ? "area points" : "grid points"} × <strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{validKw}</strong> keyword(s) = <strong>{totalScans}</strong> total scans</p>
+              <p><strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{totalPoints}</strong> {drawnShape ? "area points" : "grid points"} Ã— <strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{validKw}</strong> keyword(s) = <strong>{totalScans}</strong> total scans</p>
               {overBudget && (
                 <p className="font-semibold text-red-600">
-                  ⚠ {overBy.toLocaleString()} calls over free tier limit ({relevantRemaining.toLocaleString()} remaining). Charges will apply at $0.032/call.
+                  âš  {overBy.toLocaleString()} calls over free tier limit ({relevantRemaining.toLocaleString()} remaining). Charges will apply at $0.032/call.
                 </p>
               )}
-              {!drawnShape && <p>Draw a shape on the map or we will use a {gridSize}×{gridSize} grid centered on the business.</p>}
+              {!drawnShape && <p>Draw a shape on the map or we will use a {gridSize}Ã—{gridSize} grid centered on the business.</p>}
               {drawnShape && <p>The selected area is filled using the spacing above.</p>}
             </div>
 
@@ -842,9 +890,12 @@ export default function NewScanPage() {
             {/* Scan progress */}
             {scanning && (
               <div>
-                <p className="text-sm text-slate-500 mb-2">{progress}</p>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-sm text-slate-500">{progress}</p>
+                  {activeJob && <span className="text-xs font-semibold text-sky-600">{jobProgressPct}%</span>}
+                </div>
                 <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full shimmer-bar rounded-full w-full" />
+                  <div className="h-full rounded-full bg-sky-500 transition-all" style={{ width: `${jobProgressPct}%` }} />
                 </div>
               </div>
             )}
@@ -855,7 +906,7 @@ export default function NewScanPage() {
                 <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6">
                   <h3 className="text-lg font-bold text-red-600 mb-2">Over Free Tier Limit</h3>
                   <p className="text-sm text-slate-600 mb-1">
-                    This scan needs <strong>{totalScans.toLocaleString()}</strong> API calls but only <strong>{relevantRemaining.toLocaleString()}</strong> free calls remain.
+                    This scan needs <strong>{totalScans.toLocaleString()}</strong> API calls but only <strong>{relevantRemaining.toLocaleString()}</strong> free calls remain across all keys.
                   </p>
                   <p className="text-sm text-slate-600 mb-4">
                     The extra <strong>{overBy.toLocaleString()}</strong> calls will be billed at <strong>$0.032 each</strong> (~${(overBy * 0.032).toFixed(2)}).
@@ -888,7 +939,7 @@ export default function NewScanPage() {
                   : 'bg-sky-500 hover:bg-sky-600'
               }`}
             >
-              {scanning ? "Scanning…" : overBudget ? "Run Scan (Over Limit)" : "Run Scan"}
+              {scanning ? "Running in Background..." : overBudget ? "Run Scan (Over Limit)" : "Run Scan"}
             </button>
           </div>
         </div>
