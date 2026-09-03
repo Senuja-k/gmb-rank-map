@@ -2,6 +2,7 @@ import { createAdminClient } from "./supabase-server";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const FREE_TEXT_SEARCH_PRO = 5000;
+const FREE_TEXT_SEARCH_ESSENTIALS = null;
 const FREE_NEARBY_SEARCH_PRO = 5000;
 export const FREE_GEMINI_SEARCH_GROUNDING_PROMPTS = 5000;
 const COST_PER_REQUEST = 0.032;
@@ -32,6 +33,7 @@ async function loadBudget(apiKeyIndex = 0) {
     month,
     api_key_index: apiKeyIndex,
     text_search_calls: 0,
+    text_search_essentials_calls: 0,
     nearby_search_calls: 0,
     gemini_search_grounding_prompts: 0,
   };
@@ -43,8 +45,10 @@ async function loadBudget(apiKeyIndex = 0) {
 function formatKeyStatus(data) {
   const textSearchCalls = data.text_search_calls ?? 0;
   const nearbySearchCalls = data.nearby_search_calls ?? 0;
+  const textSearchEssentialsCalls = data.text_search_essentials_calls ?? 0;
   const geminiSearchGroundingPrompts = data.gemini_search_grounding_prompts ?? 0;
   const textRemaining = FREE_TEXT_SEARCH_PRO - textSearchCalls;
+  const textEssentialsRemaining = null;
   const nearbyRemaining = FREE_NEARBY_SEARCH_PRO - nearbySearchCalls;
   const geminiSearchGroundingRemaining = FREE_GEMINI_SEARCH_GROUNDING_PROMPTS - geminiSearchGroundingPrompts;
   const totalRemaining = textRemaining + nearbyRemaining;
@@ -54,6 +58,10 @@ function formatKeyStatus(data) {
     textSearchCalls,
     textSearchLimit: FREE_TEXT_SEARCH_PRO,
     textSearchRemaining: Math.max(0, textRemaining),
+    textSearchEssentialsCalls,
+    textSearchEssentialsLimit: FREE_TEXT_SEARCH_ESSENTIALS,
+    textSearchEssentialsRemaining: textEssentialsRemaining,
+    textSearchEssentialsUnlimited: true,
     nearbySearchCalls,
     nearbySearchLimit: FREE_NEARBY_SEARCH_PRO,
     nearbySearchRemaining: Math.max(0, nearbyRemaining),
@@ -86,24 +94,26 @@ export async function getAllBudgetStatuses() {
   return statuses;
 }
 
-export async function canAffordScan(pointCount, usesTextSearch, apiKeyIndex = 0) {
+export async function canAffordScan(pointCount, usesTextSearch, apiKeyIndex = 0, rankOnly = false) {
   const data = await loadBudget(apiKeyIndex);
-  const used = usesTextSearch ? data.text_search_calls : data.nearby_search_calls;
-  const limit = usesTextSearch ? FREE_TEXT_SEARCH_PRO : FREE_NEARBY_SEARCH_PRO;
-  const remaining = Math.max(0, limit - used);
+  const used = rankOnly ? (data.text_search_essentials_calls ?? 0) : usesTextSearch ? data.text_search_calls : data.nearby_search_calls;
+  const limit = rankOnly ? FREE_TEXT_SEARCH_ESSENTIALS : usesTextSearch ? FREE_TEXT_SEARCH_PRO : FREE_NEARBY_SEARCH_PRO;
+  const remaining = rankOnly ? null : Math.max(0, limit - used);
   return {
-    allowed: pointCount <= remaining,
+    allowed: rankOnly || pointCount <= remaining,
     estimatedCalls: pointCount,
     remaining,
     limit,
+    unlimited: rankOnly,
   };
 }
 
-export async function recordSpend(callsMade, usesTextSearch, apiKeyIndex = 0) {
+export async function recordSpend(callsMade, usesTextSearch, apiKeyIndex = 0, rankOnly = false) {
   const supabase = createAdminClient();
   const data = await loadBudget(apiKeyIndex);
-  const col = usesTextSearch ? "text_search_calls" : "nearby_search_calls";
-  const newVal = (usesTextSearch ? data.text_search_calls : data.nearby_search_calls) + callsMade;
+  const col = rankOnly ? "text_search_essentials_calls" : usesTextSearch ? "text_search_calls" : "nearby_search_calls";
+  const currentVal = rankOnly ? (data.text_search_essentials_calls ?? 0) : usesTextSearch ? data.text_search_calls : data.nearby_search_calls;
+  const newVal = currentVal + callsMade;
   const { error } = await supabase
     .from("budget")
     .update({ [col]: newVal })

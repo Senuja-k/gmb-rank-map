@@ -68,6 +68,8 @@ export async function saveScan(scan) {
     avg_rank: scan.avgRank,
     top3_pct: scan.top3Pct,
     total_points: scan.totalPoints,
+    rank_only: scan.rankOnly ?? false,
+    scan_mode: scan.scanMode ?? "pro_full",
   });
   if (error) throw new Error(`saveScan: ${error.message}`);
 }
@@ -77,7 +79,7 @@ export async function listScans() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("scans")
-    .select("id, business_name, place_id, keyword, grid_size, spacing_km, created_at, avg_rank, top3_pct, total_points")
+    .select("id, business_name, place_id, keyword, grid_size, spacing_km, created_at, avg_rank, top3_pct, total_points, rank_only, scan_mode")
     .order("created_at", { ascending: false });
   if (error) throw new Error(`listScans: ${error.message}`);
   return (data ?? []).map(toAppScan);
@@ -138,5 +140,7 @@ function toAppScan(row) {
     avgRank: row.avg_rank,
     top3Pct: row.top3_pct,
     totalPoints: row.total_points,
+    rankOnly: row.rank_only ?? false,
+    scanMode: row.scan_mode ?? "pro_full",
   };
 }

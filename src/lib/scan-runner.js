@@ -2,7 +2,8 @@ import { getAllBudgetStatuses, recordSpend, getBudgetStatus, API_KEY_COUNT } fro
 import { generateId, saveScan } from "./storage";
 
 const KM_PER_DEG_LAT = 111.32;
-const FIELD_MASK = "places.id,places.displayName,places.location";
+const PRO_FIELD_MASK = "places.id,places.displayName,places.location";
+const ESSENTIALS_FIELD_MASK = "places.id";
 const REQUEST_DELAY_MS = 350;
 const API_KEY_ENV_NAMES = ["GOOGLE_MAPS_API_KEY", "GOOGLE_MAPS_API_KEY_2"];
 
@@ -92,9 +93,10 @@ function placeMatchesTarget(place, targetPlaceId, targetBusinessName) {
   return { matched: nameMatch, matchedBy: nameMatch ? "name" : null };
 }
 
-function buildSearchRequest(point, keyword, apiKey) {
+function buildSearchRequest(point, keyword, apiKey, rankOnly = false) {
   const hasKeyword = keyword.trim().length > 0;
-  const headers = { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK };
+  const fieldMask = rankOnly ? ESSENTIALS_FIELD_MASK : PRO_FIELD_MASK;
+  const headers = { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": fieldMask };
   if (hasKeyword) {
     return {
       requestKind: "Text Search",
@@ -109,7 +111,7 @@ function buildSearchRequest(point, keyword, apiKey) {
   };
 }
 
-async function rankAtPoint(point, keyword, targetPlaceId, targetBusinessName, apiKey, apiKeyIndex) {
+async function rankAtPoint(point, keyword, targetPlaceId, targetBusinessName, apiKey, apiKeyIndex, rankOnly = false) {
   if (!validateGridPoint(point)) {
     return emptyPointResult(point ?? { lat: null, lng: null }, "client_validation_error", {
       errorType: "invalid_coordinates",
@@ -118,7 +120,7 @@ async function rankAtPoint(point, keyword, targetPlaceId, targetBusinessName, ap
       apiAttempts: 0,
     });
   }
-  const { requestKind, url, options } = buildSearchRequest(point, keyword, apiKey);
+  const { requestKind, url, options } = buildSearchRequest(point, keyword, apiKey, rankOnly);
   const { response: res, attempts: apiAttempts, fetchError } = await fetchOnce(url, options);
   if (!res?.ok) {
     const googleError = res ? await readGoogleError(res) : { message: fetchError?.message || "No response returned by fetch." };
@@ -141,16 +143,16 @@ async function rankAtPoint(point, keyword, targetPlaceId, targetBusinessName, ap
     if (targetMatch.matched && !matchedBy) matchedBy = targetMatch.matchedBy;
     return {
       placeId: (p.id ?? "").replace("places/", ""),
-      name: p.displayName?.text ?? "Unknown",
+      name: rankOnly ? `Place ${idx + 1}` : p.displayName?.text ?? "Unknown",
       rank: idx + 1,
-      lat: p.location?.latitude ?? null,
-      lng: p.location?.longitude ?? null,
+      lat: rankOnly ? null : p.location?.latitude ?? null,
+      lng: rankOnly ? null : p.location?.longitude ?? null,
       isTarget: targetMatch.matched,
       matchedBy: targetMatch.matchedBy,
     };
   });
   const idx = competitors.findIndex((comp) => comp.isTarget);
-  return { lat: point.lat, lng: point.lng, rank: idx === -1 ? 21 : idx + 1, status: "ok", competitors, apiAttempts, matchedBy, apiKeyIndex };
+  return { lat: point.lat, lng: point.lng, rank: idx === -1 ? 21 : idx + 1, status: "ok", competitors: rankOnly ? [] : competitors, apiAttempts, matchedBy, apiKeyIndex };
 }
 
 function buildCompetitorSummaries(gridPoints, targetPlaceId) {
@@ -182,7 +184,7 @@ function buildCompetitorSummaries(gridPoints, targetPlaceId) {
 }
 
 export function normalizeScanRequest(body) {
-  const { targetPlaceId, businessName, keyword, center, gridSize, spacingKm, customGrid, force, apiKeyIndex: rawKeyIndex } = body;
+  const { targetPlaceId, businessName, keyword, center, gridSize, spacingKm, customGrid, force, rankOnly, apiKeyIndex: rawKeyIndex } = body;
   const apiKeyIndex = Number.isInteger(rawKeyIndex) && rawKeyIndex >= 0 && rawKeyIndex < API_KEY_COUNT ? rawKeyIndex : 0;
   if (!targetPlaceId || !center || !gridSize) throw Object.assign(new Error("Missing required fields."), { status: 400 });
   if (!validateGridPoint(center)) throw Object.assign(new Error("Invalid scan center coordinates."), { status: 400 });
@@ -206,6 +208,7 @@ export function normalizeScanRequest(body) {
     spacingKm: numericSpacing,
     grid,
     force: Boolean(force),
+    rankOnly: Boolean(rankOnly),
     apiKeyIndex,
   };
 }
@@ -238,19 +241,22 @@ export async function assertScanBatchCanStart(requests) {
 
   for (const request of requests) {
     const usesTextSearch = request.keyword.trim().length > 0;
-    const key = usesTextSearch ? "text" : "nearby";
+    const key = request.rankOnly && usesTextSearch ? "text_essentials" : usesTextSearch ? "text" : "nearby";
     totals.set(key, (totals.get(key) ?? 0) + request.grid.length);
   }
 
   for (const [kind, needed] of totals) {
-    const usesTextSearch = kind === "text";
+    const rankOnly = kind === "text_essentials";
+    const usesTextSearch = kind === "text" || rankOnly;
     const available = statuses.reduce((sum, status) => {
       if (!process.env[API_KEY_ENV_NAMES[status.apiKeyIndex]]) return sum;
+      if (rankOnly && status.textSearchEssentialsUnlimited) return Number.POSITIVE_INFINITY;
+      if (rankOnly) return sum + (status.textSearchEssentialsRemaining ?? 0);
       return sum + (usesTextSearch ? status.textSearchRemaining : status.nearbySearchRemaining);
     }, 0);
 
     if (needed > available && !force) {
-      const apiName = usesTextSearch ? "Text Search" : "Nearby Search";
+      const apiName = rankOnly ? "Text Search Essentials" : usesTextSearch ? "Text Search Pro" : "Nearby Search";
       const status = await getBudgetStatus(requests[0]?.apiKeyIndex ?? 0);
       const error = new Error(`Monthly free limit reached for ${apiName} across configured keys (${available} free calls remaining, ${needed} needed). Resets next month.`);
       error.status = 429;
@@ -260,12 +266,12 @@ export async function assertScanBatchCanStart(requests) {
   }
 }
 
-async function createApiKeyAllocator(preferredApiKeyIndex, usesTextSearch, force) {
+async function createApiKeyAllocator(preferredApiKeyIndex, usesTextSearch, force, rankOnly = false) {
   const statuses = await getAllBudgetStatuses();
   const remainingByKey = new Map(
     statuses.map((status) => [
       status.apiKeyIndex,
-      usesTextSearch ? status.textSearchRemaining : status.nearbySearchRemaining,
+      rankOnly && status.textSearchEssentialsUnlimited ? Number.POSITIVE_INFINITY : rankOnly ? status.textSearchEssentialsRemaining : usesTextSearch ? status.textSearchRemaining : status.nearbySearchRemaining,
     ])
   );
   const order = orderedKeyIndexes(preferredApiKeyIndex);
@@ -275,7 +281,7 @@ async function createApiKeyAllocator(preferredApiKeyIndex, usesTextSearch, force
     const freeKeyIndex = order.find((apiKeyIndex) => (remainingByKey.get(apiKeyIndex) ?? 0) > 0);
     const apiKeyIndex = freeKeyIndex ?? (force ? order[0] : null);
     if (apiKeyIndex === null) {
-      const apiName = usesTextSearch ? "Text Search" : "Nearby Search";
+      const apiName = rankOnly ? "Text Search Essentials" : usesTextSearch ? "Text Search Pro" : "Nearby Search";
       throw Object.assign(new Error(`Monthly free limit reached for ${apiName} across configured keys.`), { status: 429 });
     }
     const remaining = remainingByKey.get(apiKeyIndex) ?? 0;
@@ -285,18 +291,23 @@ async function createApiKeyAllocator(preferredApiKeyIndex, usesTextSearch, force
 }
 export async function runSingleScan(request, onProgress) {
   const usesTextSearch = request.keyword.trim().length > 0;
-  const nextApiKey = await createApiKeyAllocator(request.apiKeyIndex, usesTextSearch, request.force);
+  const rankOnlySearch = request.rankOnly && usesTextSearch;
+  const nextApiKey = await createApiKeyAllocator(request.apiKeyIndex, usesTextSearch, request.force, rankOnlySearch);
   const results = [];
   let recordedSpend = 0;
   let activeApiKeyIndex = request.apiKeyIndex;
   for (let i = 0; i < request.grid.length; i++) {
     const key = nextApiKey();
     activeApiKeyIndex = key.apiKeyIndex;
-    const result = await rankAtPoint(request.grid[i], request.keyword, request.targetPlaceId, request.businessName, key.apiKey, key.apiKeyIndex);
+    const result = await rankAtPoint(request.grid[i], request.keyword, request.targetPlaceId, request.businessName, key.apiKey, key.apiKeyIndex, rankOnlySearch);
     results.push(result);
-    const apiSpend = result.apiAttempts || 0;
+    if (result.errorType === "rate_limited") {
+      const message = result.googleError?.error?.message || "Google quota or rate limit reached.";
+      throw Object.assign(new Error(message), { status: 429 });
+    }
+    const apiSpend = result.status === "api_error" ? 0 : result.apiAttempts || 0;
     if (apiSpend) {
-      await recordSpend(apiSpend, usesTextSearch, key.apiKeyIndex);
+      await recordSpend(apiSpend, usesTextSearch, key.apiKeyIndex, rankOnlySearch);
       recordedSpend += apiSpend;
     }
     await onProgress?.({ completedPoints: i + 1, totalPoints: request.grid.length, recordedSpend, apiKeyIndex: activeApiKeyIndex });
@@ -323,6 +334,8 @@ export async function runSingleScan(request, onProgress) {
     avgRank: avgRank === null ? null : parseFloat(avgRank.toFixed(2)),
     top3Pct: parseFloat(top3Pct.toFixed(2)),
     totalPoints: results.length,
+    rankOnly: rankOnlySearch,
+    scanMode: rankOnlySearch ? "essentials_rank_only" : "pro_full",
   };
   await saveScan(savedScan);
   return { scan: savedScan, budget: budgetStatus };

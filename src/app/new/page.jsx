@@ -97,6 +97,7 @@ export default function NewScanPage() {
   const [keywordItems, setKeywordItems] = useState([]);
   const [gridSize, setGridSize] = useState(7);
   const [spacingKm, setSpacingKm] = useState(1);
+  const [rankOnly, setRankOnly] = useState(true);
 
   // Shape state
   const [shapeType, setShapeType] = useState("square"); // square | circle | polygon
@@ -610,6 +611,7 @@ export default function NewScanPage() {
             customGrid: pointsToScan,
             force,
             apiKeyIndex: activeKeyIndex,
+            rankOnly,
           }),
         });
 
@@ -631,7 +633,7 @@ export default function NewScanPage() {
       setError(err instanceof Error ? err.message : "Scan failed.");
       setScanning(false);
     }
-  }, [place, parseKeywords, gridSize, spacingKm, drawnShape, gridPoints, router, activeKeyIndex]);
+  }, [place, parseKeywords, gridSize, spacingKm, drawnShape, gridPoints, router, activeKeyIndex, rankOnly]);
 
   const totalPoints = drawnShape ? gridPoints.length : gridSize * gridSize;
 
@@ -641,11 +643,14 @@ export default function NewScanPage() {
   const totalScans = totalPoints * validKw;
   const usesTextSearch = parsedKeywords.some((k) => k.trim().length > 0);
   const relevantRemaining = budgets
-    ? budgets.reduce(
-        (sum, budget) => sum + (usesTextSearch ? budget.textSearchRemaining : budget.nearbySearchRemaining),
-        0
-      )
+    ? budgets.reduce((sum, budget) => {
+        if (rankOnly && budget.textSearchEssentialsUnlimited) return Infinity;
+        if (rankOnly) return sum + (budget.textSearchEssentialsRemaining ?? 0);
+        return sum + (usesTextSearch ? budget.textSearchRemaining : budget.nearbySearchRemaining);
+      }, 0)
     : Infinity;
+  const scanModeLabel = rankOnly ? "Essentials rank only" : "Pro full scan";
+  const remainingLabel = Number.isFinite(relevantRemaining) ? relevantRemaining.toLocaleString() : "unlimited";
   const overBudget = totalScans > relevantRemaining;
   const overBy = totalScans - relevantRemaining;
 
@@ -779,6 +784,42 @@ export default function NewScanPage() {
               </p>
             </div>
 
+            {/* Scan mode */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                Scan Mode
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRankOnly(true)}
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                    rankOnly
+                      ? "border-sky-300 bg-sky-50 text-sky-700"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">Essentials</span>
+                  <span className="block text-xs">Rank only, IDs-only</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRankOnly(false)}
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                    !rankOnly
+                      ? "border-sky-300 bg-sky-50 text-sky-700"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">Pro</span>
+                  <span className="block text-xs">Competitors, 5,000/mo</span>
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Essentials saves Pro quota by requesting only place IDs. Competitor names and pins are only available in Pro mode.
+              </p>
+            </div>
+
             {/* Grid config */}
             <div className={`grid gap-3 ${drawnShape ? "grid-cols-1" : "grid-cols-2"}`}>
               <div className={drawnShape ? "hidden" : ""}>
@@ -821,13 +862,13 @@ export default function NewScanPage() {
 
             {/* Info */}
             <div className={`rounded-lg p-3 text-xs space-y-1 ${overBudget ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500'}`}>
-              <p><strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{totalPoints}</strong> {drawnShape ? "area points" : "grid points"} Ã— <strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{validKw}</strong> keyword(s) = <strong>{totalScans}</strong> total scans</p>
+              <p><strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{totalPoints}</strong> {drawnShape ? "area points" : "grid points"} x <strong className={overBudget ? 'text-red-700' : 'text-sky-600'}>{validKw}</strong> keyword(s) = <strong>{totalScans}</strong> total calls</p>
+              <p>Mode: <strong>{scanModeLabel}</strong></p>
               {overBudget && (
-                <p className="font-semibold text-red-600">
-                  âš  {overBy.toLocaleString()} calls over free tier limit ({relevantRemaining.toLocaleString()} remaining). Charges will apply at $0.032/call.
+                <p className="font-semibold text-red-600">                  {overBy.toLocaleString()} calls over the {scanModeLabel} free tier ({remainingLabel} remaining). Charges may apply in Google Cloud.
                 </p>
               )}
-              {!drawnShape && <p>Draw a shape on the map or we will use a {gridSize}Ã—{gridSize} grid centered on the business.</p>}
+              {!drawnShape && <p>Draw a shape on the map or we will use a {gridSize}x{gridSize} grid centered on the business.</p>}
               {drawnShape && <p>The selected area is filled using the spacing above.</p>}
             </div>
 
