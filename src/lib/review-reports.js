@@ -1,6 +1,8 @@
 import { createAdminClient } from "./supabase-server";
 import { generateId } from "./storage";
 
+const REVIEW_REPORT_RETENTION_MONTHS = 1;
+
 function toAppReport(row) {
   return {
     id: row.id,
@@ -15,8 +17,36 @@ function toAppReport(row) {
   };
 }
 
+function getReviewReportRetentionCutoff() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - REVIEW_REPORT_RETENTION_MONTHS);
+  return cutoff.toISOString();
+}
+
+export async function cleanupOldReviewReports(supabase = createAdminClient()) {
+  const { data, error } = await supabase
+    .from("gbp_review_reports")
+    .delete()
+    .lt("created_at", getReviewReportRetentionCutoff())
+    .select("id");
+
+  if (error) throw new Error(`cleanupOldReviewReports: ${error.message}`);
+  return { deletedCount: (data ?? []).length };
+}
+
+async function cleanupOldReviewReportsSafely(supabase) {
+  try {
+    return await cleanupOldReviewReports(supabase);
+  } catch (err) {
+    console.warn("[GBP review reports cleanup]", err);
+    return { deletedCount: 0, error: err.message };
+  }
+}
+
 export async function listReviewReports() {
   const supabase = createAdminClient();
+  await cleanupOldReviewReportsSafely(supabase);
+
   const { data, error } = await supabase
     .from("gbp_review_reports")
     .select("id, title, start_date, end_date, month_label, locations, computed_values, created_at")
@@ -40,6 +70,8 @@ export async function getReviewReport(id) {
 
 export async function saveReviewReport(report) {
   const supabase = createAdminClient();
+  await cleanupOldReviewReportsSafely(supabase);
+
   const id = generateId();
   const { data, error } = await supabase
     .from("gbp_review_reports")

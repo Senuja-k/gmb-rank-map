@@ -22,6 +22,55 @@ import { NextResponse } from "next/server";
 import { generateAndPublishPost, createGbpPost, fetchPostsForLocation, updateGbpPost, deleteGbpPost } from "@/lib/gbp";
 import { createAdminClient } from "@/lib/supabase-server";
 
+const POST_IMAGE_BUCKET = "post-images";
+const POST_IMAGE_RETENTION_DAYS = Number.parseInt(process.env.POST_IMAGE_RETENTION_DAYS ?? "7", 10);
+const POST_IMAGE_CLEANUP_LIMIT = 1000;
+
+function getPostImageRetentionMs() {
+  const days = Number.isFinite(POST_IMAGE_RETENTION_DAYS) && POST_IMAGE_RETENTION_DAYS > 0
+    ? POST_IMAGE_RETENTION_DAYS
+    : 7;
+  return days * 24 * 60 * 60 * 1000;
+}
+
+async function cleanupOldPostImages(supabase) {
+  const cutoff = Date.now() - getPostImageRetentionMs();
+  const { data, error } = await supabase.storage
+    .from(POST_IMAGE_BUCKET)
+    .list("", {
+      limit: POST_IMAGE_CLEANUP_LIMIT,
+      sortBy: { column: "created_at", order: "asc" },
+    });
+
+  if (error) throw new Error(error.message);
+
+  const stalePaths = (data ?? [])
+    .filter((item) => {
+      const createdAt = item.created_at ?? item.updated_at;
+      return createdAt && new Date(createdAt).getTime() < cutoff;
+    })
+    .map((item) => item.name);
+
+  if (!stalePaths.length) return { deletedCount: 0 };
+
+  const { error: removeError } = await supabase.storage
+    .from(POST_IMAGE_BUCKET)
+    .remove(stalePaths);
+
+  if (removeError) throw new Error(removeError.message);
+
+  return { deletedCount: stalePaths.length };
+}
+
+async function cleanupOldPostImagesSafely(supabase) {
+  try {
+    return await cleanupOldPostImages(supabase);
+  } catch (err) {
+    console.warn("[GBP posts image cleanup]", err);
+    return { deletedCount: 0, error: err.message };
+  }
+}
+
 function extractGooglePostError(err) {
   const apiError = err.response?.data?.error ?? err.cause ?? err;
   const detailGroups = [
@@ -179,7 +228,8 @@ export async function POST(request) {
     // Legacy: mode=generate uses Gemini from topic text
     if (mode === "generate" && topic) {
       const result = await generateAndPublishPost(email, fullLocationPath, topic, imageUrl);
-      return NextResponse.json(result);
+      const imageCleanup = await cleanupOldPostImagesSafely(supabase);
+      return NextResponse.json({ ...result, imageCleanup });
     }
 
     if (!summaryText) {
@@ -208,7 +258,8 @@ export async function POST(request) {
       ctaActionType,
       normalizedScheduledTime
     );
-    return NextResponse.json({ apiResponse });
+    const imageCleanup = await cleanupOldPostImagesSafely(supabase);
+    return NextResponse.json({ apiResponse, imageCleanup });
   } catch (err) {
     console.error("[GBP posts]", err);
     return NextResponse.json({ error: extractGooglePostError(err) }, { status: getPublishErrorStatus(err) });
